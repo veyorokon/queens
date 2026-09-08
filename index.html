@@ -420,7 +420,8 @@
     : document.documentElement.getAttribute('data-theme') === 'dark';
   function applyTheme(mode) {
     document.documentElement.setAttribute('data-theme', mode);
-    document.querySelector('meta[name=theme-color]').setAttribute('content', mode === 'dark' ? '#15181e' : '#f5f4ef');
+    const meta = document.querySelector('meta[name=theme-color]');
+    if (meta) meta.setAttribute('content', mode === 'dark' ? '#15181e' : '#f5f4ef');
     $('themeBtn').textContent = mode === 'dark' ? t('light') : t('dark');
   }
   try { applyTheme(localStorage.getItem(THEME_KEY) || 'dark'); } catch (e) { applyTheme('dark'); }
