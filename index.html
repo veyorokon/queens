@@ -17,6 +17,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Vazirmatn:wght@400;700&display=swap">
 <style>
   :root {
+    color-scheme: light;
     --paper: #f5f4ef;
     --paper-2: #e9e8e1;
     --ink: #1f2430;
@@ -45,6 +46,7 @@
   :root[lang="fa"] .stat span, :root[lang="fa"] .seg small, :root[lang="fa"] .field > span { text-transform: none; letter-spacing: 0; }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
+      color-scheme: dark;
       --paper: #15181e; --paper-2: #1e222a; --ink: #e8e6df; --ink-soft: #9aa0ad;
       --line-thin: #3a404c; --accent: #86aaff;
       --wrong: #ff8a80; --wrong-wash: rgba(255, 138, 128, .28); --ok: #6fce97;
@@ -56,6 +58,7 @@
     }
   }
   :root[data-theme="dark"] {
+    color-scheme: dark;
     --paper: #15181e; --paper-2: #1e222a; --ink: #e8e6df; --ink-soft: #9aa0ad;
     --line-thin: #3a404c; --accent: #86aaff;
     --wrong: #ff8a80; --wrong-wash: rgba(255, 138, 128, .28); --ok: #6fce97;
