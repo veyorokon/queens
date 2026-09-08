@@ -10,6 +10,17 @@
 
   const LETTERS = 'abcdefghij';
 
+  // How even the colours have to be, per difficulty band. A board studded with
+  // one- and two-square colours solves itself: those squares are singles on
+  // sight, so the puzzle is over before it starts. The floor rises with the
+  // band, and Hard also has to be visibly even, measured as the coefficient of
+  // variation of the region sizes (sd / mean, and the mean is always N).
+  const SIZE_PROFILE = [
+    { minRegion: 2, maxCV: Infinity },   // 0 easy
+    { minRegion: 3, maxCV: Infinity },   // 1 medium
+    { minRegion: 4, maxCV: 0.35 },       // 2 hard
+  ];
+
   // ---------------------------------------------------------------- utility
   function makeRng(seed) {
     let a = (seed >>> 0) || 1;
@@ -347,6 +358,10 @@
   //   2 line confinement  a colour trapped in one line, or a line all one colour
   //   3 forced squares    a square every placement of some unit would wipe out
   //   4 disproof          put a crown down, watch a colour run out of room
+  // The band that comes out is the technique band capped by the size profile:
+  // a board with a colour under 3 squares can never be more than Easy, and one
+  // under 4 squares, or with sizes spread wider than a CV of 0.35, can never be
+  // Hard. Tier and score still order the ramp inside a band.
   function rate(N, regions) {
     const st = newState(N, regions);
     const rounds = [0, 0, 0, 0];
@@ -365,8 +380,12 @@
     }
     // Effort per row of board: how much work beyond plain singles it took.
     const effort = (rounds[1] + rounds[2] * 1.6 + rounds[3] * 6) / N;
-    const band = rounds[3] > 0 ? 2 : (effort >= 0.32 ? 1 : 0);
-    return { solved: true, rounds, tier, effort: Math.round(effort * 100) / 100, band, score: Math.round(effort * 100), sol: Array.from(st.queenCol) };
+    const techBand = rounds[3] > 0 ? 2 : (effort >= 0.32 ? 1 : 0);
+    const band = Math.min(techBand, sizeCap(N, regions));
+    return {
+      solved: true, rounds, tier, effort: Math.round(effort * 100) / 100,
+      techBand, band, score: Math.round(effort * 100), sol: Array.from(st.queenCol),
+    };
   }
 
   // ---------------------------------------------------------------- hinting
@@ -414,7 +433,9 @@
 
   // Each region is seeded on its queen and grown by flood fill, biased so it
   // stays a blob: a cell already touching the region on two sides wins.
-  function growRegions(N, sol, rnd) {
+  function growRegions(N, sol, rnd, opts) {
+    opts = opts || {};
+    const even = !!opts.even;
     const total = N * N;
     const reg = new Int8Array(total).fill(-1);
     const size = new Int32Array(N).fill(1);
@@ -456,9 +477,21 @@
       let pool = [];
       for (let g = 0; g < N; g++) if (front[g].size) pool.push(g);
       if (!pool.length) break;
-      let weights = pool.map(g => 1 / Math.pow(size[g], 1.7));
-      let sum = weights.reduce((a, b) => a + b, 0), pick = rnd() * sum, g = pool[pool.length - 1];
-      for (let k = 0; k < pool.length; k++) { pick -= weights[k]; if (pick <= 0) { g = pool[k]; break; } }
+      let g;
+      if (even) {
+        // Hard boards want colours all much of a muchness, so the smallest one
+        // still growing always takes the next square.
+        let least = Infinity;
+        for (const h of pool) if (size[h] < least) least = size[h];
+        const tied = pool.filter(h => size[h] === least);
+        g = tied[(rnd() * tied.length) | 0];
+      } else {
+        const weights = pool.map(h => 1 / Math.pow(size[h], 1.7));
+        const sum = weights.reduce((a, b) => a + b, 0);
+        let pick = rnd() * sum;
+        g = pool[pool.length - 1];
+        for (let k = 0; k < pool.length; k++) { pick -= weights[k]; if (pick <= 0) { g = pool[k]; break; } }
+      }
       const i = pickCell(g);
       if (i < 0) { front[g].clear(); continue; }
       claim(g, i);
@@ -493,11 +526,15 @@
 
   // After a cell leaves a region, any piece of that region left stranded is
   // handed to whichever neighbour it touches, so every region stays one blob.
-  function repairRegion(N, regions, g, solCells) {
+  // minRegion is the smallest the shrinking region may end up: below it the
+  // repair is refused rather than shaving the colour down to a token square.
+  // Returns true only if the region came out whole and still big enough.
+  function repairRegion(N, regions, g, solCells, minRegion) {
+    const floor = minRegion || 1;
     const nbr = neighbours(N);
     const cells = [];
     for (let i = 0; i < N * N; i++) if (regions[i] === g) cells.push(i);
-    if (!cells.length) return;
+    if (!cells.length) return false;
     let seed = cells.find(i => solCells.has(i));
     if (seed === undefined) seed = cells[0];
     const keep = new Set([seed]), stack = [seed];
@@ -505,6 +542,7 @@
       const i = stack.pop();
       for (const j of nbr[i]) if (regions[j] === g && !keep.has(j)) { keep.add(j); stack.push(j); }
     }
+    if (keep.size < floor) return false;
     let orphans = cells.filter(i => !keep.has(i));
     let guard = 0;
     while (orphans.length && guard++ < N * N * 4) {
@@ -516,12 +554,18 @@
       }
       if (!moved) break;
     }
+    return orphans.length === 0;
   }
 
   // Walk the board toward a single answer: find a rival solution, move one of
   // its queen squares into a neighbouring colour, repeat. The intended
   // solution survives every move because only non-queen squares change hands.
-  function tighten(N, regions, sol, rnd, maxSteps) {
+  // minRegion is the size floor every colour keeps throughout: a move that
+  // would shave a colour below it is rolled back and another rival row or
+  // another neighbouring colour is tried instead. When no legal move is left
+  // the candidate fails rather than shipping a board of slivers.
+  function tighten(N, regions, sol, rnd, maxSteps, minRegion) {
+    const floor = minRegion || 1;
     const nbr = neighbours(N);
     const solCells = new Set(sol.map((c, r) => r * N + c));
     for (let step = 0; step < maxSteps; step++) {
@@ -532,15 +576,81 @@
       for (const r of rows) {
         const x = r * N + alt[r], g = regions[x];
         const hs = shuffle(Array.from(new Set(nbr[x].map(j => regions[j]).filter(h => h !== g))), rnd);
-        if (!hs.length) continue;
-        regions[x] = hs[0];
-        repairRegion(N, regions, g, solCells);
-        done = true;
-        break;
+        for (const h of hs) {
+          // Try the move on a copy: the repair can strand cells or eat the
+          // colour, and only a move that leaves every floor intact is kept.
+          const trial = regions.slice();
+          trial[x] = h;
+          if (!repairRegion(N, trial, g, solCells, floor)) continue;
+          if (minSize(N, trial) < floor) continue;
+          regions.set(trial);
+          done = true;
+          break;
+        }
+        if (done) break;
       }
       if (!done) return -1;
     }
     return -1;
+  }
+
+  // Would region g still be one blob if cell x left it?
+  function regionWhole(N, regions, g, x) {
+    const nbr = neighbours(N), cells = [];
+    for (let i = 0; i < N * N; i++) if (regions[i] === g && i !== x) cells.push(i);
+    if (!cells.length) return false;
+    const seen = new Set([cells[0]]), st = [cells[0]];
+    while (st.length) {
+      const i = st.pop();
+      for (const j of nbr[i]) if (j !== x && regions[j] === g && !seen.has(j)) { seen.add(j); st.push(j); }
+    }
+    return seen.size === cells.length;
+  }
+
+  // Even the colours up once the board already has its single answer. Tighten
+  // works by taking squares off one colour and giving them to another, so it
+  // leaves the sizes lopsided however evenly they started; squeezing it for
+  // evenness at the same time as uniqueness just makes it fail. So this runs
+  // after: hand single boundary squares from the big colours to the small ones,
+  // steepest step first, keeping every colour whole and above the floor, never
+  // moving an answer square, and rolling back any move that costs the board its
+  // single answer. It stops at the first pass that cannot improve.
+  function rebalance(N, regions, sol, rnd, minRegion, maxMoves) {
+    const floor = minRegion || 1;
+    const nbr = neighbours(N);
+    const solCells = new Set(sol.map((c, r) => r * N + c));
+    let moves = 0;
+    for (let pass = 0; pass < (maxMoves || 400); pass++) {
+      const size = regionSizes(N, regions);
+      const cands = [];
+      for (let i = 0; i < N * N; i++) {
+        const g = regions[i];
+        if (solCells.has(i) || size[g] - 1 < floor) continue;
+        const seen = new Set();
+        for (const j of nbr[i]) {
+          const h = regions[j];
+          if (h === g || seen.has(h)) continue;
+          seen.add(h);
+          // change in the sum of squared deviations; the mean is always N
+          const d = (size[g] - 1 - N) * (size[g] - 1 - N) + (size[h] + 1 - N) * (size[h] + 1 - N)
+            - (size[g] - N) * (size[g] - N) - (size[h] - N) * (size[h] - N);
+          if (d < 0) cands.push({ i, h, d });
+        }
+      }
+      if (!cands.length) break;
+      shuffle(cands, rnd);
+      cands.sort((a, b) => a.d - b.d);
+      let did = false;
+      for (const c of cands) {
+        const g = regions[c.i];
+        if (!regionWhole(N, regions, g, c.i)) continue;
+        regions[c.i] = c.h;
+        if (countSolutions(N, regions, 2) !== 1) { regions[c.i] = g; continue; }
+        moves++; did = true; break;
+      }
+      if (!did) break;
+    }
+    return moves;
   }
 
   function regionSizes(N, regions) {
@@ -548,21 +658,64 @@
     for (let i = 0; i < N * N; i++) cnt[regions[i]]++;
     return cnt;
   }
+  function minSize(N, regions) {
+    const cnt = regionSizes(N, regions);
+    let m = Infinity;
+    for (const v of cnt) if (v < m) m = v;
+    return m;
+  }
+  // sd / mean over the region sizes. N regions share N*N cells, so the mean is
+  // always N and this is just the spread: 0 when every colour is the same size.
+  function sizeCV(N, regions) {
+    const cnt = regionSizes(N, regions);
+    let ss = 0;
+    for (const v of cnt) ss += (v - N) * (v - N);
+    return Math.sqrt(ss / N) / N;
+  }
+  // The highest band these region sizes may claim, whatever the technique
+  // solver had to do. A board with a one- or two-square colour is easy however
+  // twisty the rest of it is, because that colour is a free crown.
+  function sizeCap(N, regions) {
+    const min = minSize(N, regions);
+    if (min < SIZE_PROFILE[1].minRegion) return 0;
+    if (min < SIZE_PROFILE[2].minRegion || sizeCV(N, regions) > SIZE_PROFILE[2].maxCV) return 1;
+    return 2;
+  }
+  // The profile a call is generating to: an explicit minRegion/maxCV wins,
+  // otherwise the target band's, otherwise the floor every band shares.
+  function profileOf(opts) {
+    const base = SIZE_PROFILE[opts && opts.band != null ? opts.band : 0] || SIZE_PROFILE[0];
+    return {
+      minRegion: opts && opts.minRegion != null ? opts.minRegion : base.minRegion,
+      maxCV: opts && opts.maxCV != null ? opts.maxCV : base.maxCV,
+    };
+  }
 
   function makePuzzle(N, rnd, opts) {
     opts = opts || {};
+    const prof = profileOf(opts);
+    // Hard wants even colours from the first square, not evened up afterwards.
+    const even = opts.even == null ? opts.band === 2 : !!opts.even;
     const sol = randomPlacement(N, rnd);
     if (!sol) return null;
-    const regions = growRegions(N, sol, rnd);
+    const regions = growRegions(N, sol, rnd, { even });
     if (!regions) return null;
-    if (tighten(N, regions, sol, rnd, opts.maxSteps || 600) < 0) return null;
+    if (minSize(N, regions) < prof.minRegion) return null;
+    if (tighten(N, regions, sol, rnd, opts.maxSteps || 600, prof.minRegion) < 0) return null;
     if (countSolutions(N, regions, 2) !== 1) return null;
+    // Only the bands that ask for even colours pay for it. Easy and Medium are
+    // meant to look scattered, and leaving them alone keeps them quick to make.
+    if (isFinite(prof.maxCV)) {
+      rebalance(N, regions, sol, rnd, prof.minRegion, opts.maxMoves || 400);
+      if (countSolutions(N, regions, 2) !== 1) return null;
+    }
     const sizes = regionSizes(N, regions);
-    const tiny = sizes.filter(v => v <= 1).length;
-    if (tiny > (opts.maxTiny == null ? 1 : opts.maxTiny)) return null;
+    if (minSize(N, regions) < prof.minRegion) return null;
+    const cv = sizeCV(N, regions);
+    if (cv > prof.maxCV) return null;
     const r = rate(N, regions);
     if (!r.solved) return null;
-    return { N, regions, sol, band: r.band, score: r.score, tier: r.tier, rounds: r.rounds, sizes };
+    return { N, regions, sol, band: r.band, score: r.score, tier: r.tier, rounds: r.rounds, sizes, cv };
   }
 
   // opts: { band, budgetMs, tries, rng }
@@ -598,6 +751,8 @@
     encode, decode,
     newState, cloneState, place, singlesPass, linePass, confinePass, lookaheadPass, findSingle,
     rate, hint,
-    randomPlacement, growRegions, altSolution, tighten, repairRegion, regionSizes, makePuzzle, generate, verify,
+    randomPlacement, growRegions, altSolution, tighten, repairRegion, rebalance, regionWhole,
+    SIZE_PROFILE, regionSizes, minSize, sizeCV, sizeCap, profileOf,
+    makePuzzle, generate, verify,
   };
 });

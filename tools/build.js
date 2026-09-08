@@ -12,11 +12,15 @@ const PLAN = [
   [9, 0, 14], [9, 1, 14], [9, 2, 10],
   [10, 0, 8], [10, 1, 10], [10, 2, 6],
 ];
-const POOL_PER_BUCKET = 5;   // spare puzzles the page falls back on in Random mode
+// Random mode falls back on these when it cannot make a board inside its
+// budget, which for a 10x10 Hard is most of the time, so the bucket has to be
+// deep enough that she does not see the same board twice in a sitting.
+const POOL_PER_BUCKET = 14;
 const BAND_NAME = ['easy', 'medium', 'hard'];
 
 const rnd = C.makeRng(20260908);
 const seen = new Set();
+const timing = [];
 
 function collect(N, band, want, label) {
   const out = [];
@@ -25,7 +29,9 @@ function collect(N, band, want, label) {
   while (out.length < want) {
     tries++;
     if (tries > 400000) throw new Error('gave up on ' + label);
-    const p = C.makePuzzle(N, rnd);
+    // Generating to the band, not filtering afterwards: the size floor and the
+    // evening pass are part of what the band means now.
+    const p = C.makePuzzle(N, rnd, { band });
     if (!p || p.band !== band) continue;
     const key = Array.from(p.regions).join('');
     if (seen.has(key)) continue;
@@ -33,8 +39,11 @@ function collect(N, band, want, label) {
     out.push(p);
   }
   out.sort((a, b) => a.score - b.score);
-  console.log('  ' + label.padEnd(16) + out.length + ' puzzles, ' + tries + ' tries, ' +
-    ((Date.now() - t0) / 1000).toFixed(1) + 's, score ' + out[0].score + '-' + out[out.length - 1].score);
+  const ms = (Date.now() - t0) / out.length;
+  timing.push({ N, band, n: out.length, tries, ms, label });
+  console.log('  ' + label.padEnd(18) + String(out.length).padStart(3) + ' puzzles, ' + String(tries).padStart(7) + ' tries, ' +
+    ((Date.now() - t0) / 1000).toFixed(1).padStart(6) + 's, ' + ms.toFixed(0).padStart(5) + ' ms each, score ' +
+    out[0].score + '-' + out[out.length - 1].score);
   return out;
 }
 
@@ -65,6 +74,12 @@ const check = p => {
   const r = C.rate(d.N, d.regions);
   if (!r.solved) throw new Error('needs guessing: ' + s);
   if (r.band !== d.band) throw new Error('band drifted: ' + s);
+  // the size profile is part of the band, so it gets checked here too
+  const prof = C.SIZE_PROFILE[d.band];
+  const min = C.minSize(d.N, d.regions);
+  if (min < prof.minRegion) throw new Error('colour of ' + min + ' squares in a ' + BAND_NAME[d.band] + ': ' + s);
+  const cv = C.sizeCV(d.N, d.regions);
+  if (cv > prof.maxCV) throw new Error('sizes too spread (cv ' + cv.toFixed(2) + ') for ' + BAND_NAME[d.band] + ': ' + s);
   checked++;
   return s;
 };
@@ -109,3 +124,29 @@ console.log('\nwrote ' + target);
 console.log('  campaign ' + campaignStrings.length + ' levels, ' + (fs.statSync(target).size / 1024).toFixed(1) + ' kB total');
 for (const N of [7, 8, 9, 10]) console.log('    ' + N + 'x' + N + '  easy/med/hard ' + bandsBySize[N].join('/'));
 console.log('  spare pool ' + Object.values(poolStrings).flat(2).length + ' puzzles');
+
+// ------------------------------------------------------------- what shipped
+const all = campaign.concat(Object.values(pool).flat(2));
+console.log('\n  band    n  has 1-cell  has <=2-cell  avg min size  avg size CV');
+for (const band of [0, 1, 2]) {
+  const g = all.filter(p => p.band === band);
+  const mins = g.map(p => Math.min.apply(null, p.sizes));
+  const avg = a => (a.reduce((x, y) => x + y, 0) / a.length);
+  console.log('  ' + BAND_NAME[band].padEnd(7) + String(g.length).padStart(3) +
+    String(mins.filter(v => v <= 1).length).padStart(12) +
+    String(mins.filter(v => v <= 2).length).padStart(14) +
+    avg(mins).toFixed(2).padStart(14) +
+    avg(g.map(p => C.sizeCV(p.N, p.regions))).toFixed(2).padStart(13));
+}
+
+console.log('\n  generation time, ms per puzzle');
+console.log('  size     easy    medium      hard');
+for (const N of [7, 8, 9, 10]) {
+  const cell = band => {
+    const rows = timing.filter(t => t.N === N && t.band === band);
+    const n = rows.reduce((a, t) => a + t.n, 0);
+    const ms = rows.reduce((a, t) => a + t.ms * t.n, 0) / n;
+    return ms.toFixed(0).padStart(10);
+  };
+  console.log('  ' + String(N + 'x' + N).padEnd(7) + cell(0) + cell(1) + cell(2));
+}

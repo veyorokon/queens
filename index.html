@@ -514,7 +514,12 @@
       mode, level, randSize, randBand, randCode,
       code: P ? C.encode(P) : null,
       marks: marks ? Array.from(marks).join('') : null,
-      owners, mistakes, elapsed, solved, autoX, showTimer, progress, bests, levelBests,
+      owners, mistakes, elapsed, solved, autoX, showTimer, bests,
+      // The campaign was regenerated when the difficulty bands were fixed, so
+      // level 12 is no longer the board it used to be. Per-level progress and
+      // records move to fresh keys rather than crediting boards nobody played;
+      // per-size records and the preferences keep their old ones.
+      progress2: progress, levelBests2: levelBests,
     };
     // The undo stack is stored with the board, so closing the tab mid-puzzle does
     // not cost her the moves she might want back. Only the last 40 moves go to
@@ -936,7 +941,11 @@
     $('hintLine').textContent = '';
     // generate on the spot when it is quick, fall back to the shipped pool
     let p = null;
-    try { p = C.generate(randSize, { band: randBand, budgetMs: randSize >= 10 ? 900 : 500, strict: true }); } catch (e) {}
+    // Made fresh when that is quick, which is every size at Easy and Medium and
+    // the small boards at Hard. A 10x10 Hard has to be both even and twisty and
+    // takes over a second to find, so the budget stops short of that and the
+    // shipped pool answers instantly instead of freezing the board mid-tap.
+    try { p = C.generate(randSize, { band: randBand, budgetMs: 500, strict: true }); } catch (e) {}
     let code;
     if (p) code = C.encode(p);
     else {
@@ -1092,15 +1101,19 @@
     randCode = saved.randCode || null;
     autoX = saved.autoX !== false;
     showTimer = saved.showTimer !== false;
-    progress = saved.progress || {};
+    progress = saved.progress2 || {};
     bests = saved.bests || {};
-    levelBests = saved.levelBests || {};
+    levelBests = saved.levelBests2 || {};
   }
   setMode(mode);
   applyTimerVisibility();
   diff.value = String(randBand);
   paintSlider();
-  if (saved && saved.code) {
+  // A half-finished board is only picked back up if it is still the board that
+  // level holds, for the same reason the progress keys moved.
+  const resumable = !!(saved && saved.code) &&
+    (mode !== 'campaign' || saved.code === LEVELS.campaign[level]);
+  if (resumable) {
     P = C.decode(saved.code);
     buildBoard();
     restoreMarks(saved.marks || '', saved.owners);

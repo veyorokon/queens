@@ -158,11 +158,18 @@ head('5. the rater never calls a guessy board solvable');
   const made = [];
   const r2 = C.makeRng(515);
   while (made.length < 60) { const p = C.makePuzzle(7 + (made.length % 4), r2); if (p) made.push(p); }
-  ok('Hard is exactly the set that needed a disproof', made.every(p => {
+  ok('the technique band is exactly the set that needed a disproof', made.every(p => {
     const r = C.rate(p.N, p.regions);
-    return (r.band === 2) === (r.rounds[3] > 0);
+    return (r.techBand === 2) === (r.rounds[3] > 0);
   }));
-  ok('Easy puzzles never needed a disproof', made.filter(p => p.band === 0).every(p => C.rate(p.N, p.regions).rounds[3] === 0));
+  ok('a board called Hard always needed a disproof', made.every(p => {
+    const r = C.rate(p.N, p.regions);
+    return r.band !== 2 || r.rounds[3] > 0;
+  }));
+  ok('the band never runs above what the sizes allow', made.every(p => {
+    const r = C.rate(p.N, p.regions);
+    return r.band <= C.sizeCap(p.N, p.regions);
+  }));
   ok('rating is deterministic', made.every(p => C.rate(p.N, p.regions).band === C.rate(p.N, p.regions).band));
 }
 
@@ -263,6 +270,86 @@ head('8. generation timing per size (average over 25 puzzles)');
   for (const r of rows) {
     const budget = r.N <= 9 ? 300 : 1000;
     ok(r.N + 'x' + r.N + ' averages under ' + budget + 'ms (' + r.avg.toFixed(1) + 'ms)', r.avg < budget);
+  }
+}
+
+// ------------------------------------------------------ 9. the size profile
+head('9. colour sizes carry the difficulty');
+{
+  // The complaint that started this: boards turning up with a one- or two-square
+  // colour, which is a crown for free and makes the rest fall out. The floor
+  // rises with the band and Hard also has to look even.
+  const rnd = C.makeRng(24680);
+  for (const band of [0, 1, 2]) {
+    const prof = C.SIZE_PROFILE[band];
+    const made = [];
+    while (made.length < 100) {
+      const p = C.makePuzzle(7 + (made.length % 4), rnd, { band });
+      if (p) made.push(p);
+    }
+    // tighten and its repair are what used to shave colours down to a square,
+    // so this is the check that they now refuse a move that would
+    ok('100 ' + ['easy', 'medium', 'hard'][band] + ' generations: no colour under ' + prof.minRegion + ' squares',
+      made.every(p => C.minSize(p.N, p.regions) >= prof.minRegion),
+      'smallest seen ' + Math.min.apply(null, made.map(p => C.minSize(p.N, p.regions))));
+    if (isFinite(prof.maxCV)) {
+      const worst = Math.max.apply(null, made.filter(p => p.band === band).map(p => C.sizeCV(p.N, p.regions)));
+      ok('every Hard that came out Hard is within a CV of ' + prof.maxCV, worst <= prof.maxCV, 'worst ' + worst.toFixed(2));
+    }
+  }
+
+  // tighten on its own, not just through makePuzzle
+  {
+    const r2 = C.makeRng(1357);
+    let runs = 0, breaches = 0;
+    for (const floor of [2, 3, 4]) {
+      let n = 0;
+      while (n < 100) {
+        const N = 7 + (n % 4);
+        const sol = C.randomPlacement(N, r2);
+        const reg = C.growRegions(N, sol, r2, { even: floor >= 4 });
+        if (!reg || C.minSize(N, reg) < floor) continue;
+        n++; runs++;
+        if (C.tighten(N, reg, sol, r2, 600, floor) < 0) continue;   // refusing is allowed
+        if (C.minSize(N, reg) < floor) breaches++;
+      }
+    }
+    ok('tighten never breaches the floor over ' + runs + ' runs', breaches === 0, breaches + ' breaches');
+  }
+
+  // a tiny colour can never be called Hard, however twisty the rest of it is
+  {
+    const r3 = C.makeRng(4680);
+    let tiny = 0, tinyHard = 0, tinyTechHard = 0;
+    for (let k = 0; k < 600 && tiny < 120; k++) {
+      const N = 7 + (k % 4);
+      const p = C.makePuzzle(N, r3, { minRegion: 1, maxCV: Infinity });
+      if (!p || C.minSize(N, p.regions) > 2) continue;
+      tiny++;
+      const r = C.rate(N, p.regions);
+      if (r.band === 2) tinyHard++;
+      if (r.techBand === 2) tinyTechHard++;
+    }
+    ok('rate() calls no board with a 1-2 square colour Hard (' + tiny + ' such boards)', tinyHard === 0, tinyHard + ' slipped through');
+    ok('and the check is not vacuous: ' + tinyTechHard + ' of them needed a disproof', tinyTechHard > 0);
+  }
+
+  // everything that actually ships
+  {
+    const levels = require(path.join(__dirname, '..', 'levels.js'));
+    const all = levels.campaign.concat(...Object.values(levels.pool).map(b => [].concat.apply([], b)));
+    let bad = null, n = 0;
+    for (const str of all) {
+      const d = C.decode(str);
+      const prof = C.SIZE_PROFILE[d.band];
+      const min = C.minSize(d.N, d.regions), cv = C.sizeCV(d.N, d.regions);
+      if (min < prof.minRegion || cv > prof.maxCV) { bad = str + ' min ' + min + ' cv ' + cv.toFixed(2); break; }
+      if (C.rate(d.N, d.regions).band !== d.band) { bad = 'band drifted: ' + str; break; }
+      n++;
+    }
+    ok('all ' + all.length + ' shipped puzzles meet their band profile', bad === null, bad || '');
+    ok('no shipped puzzle has a colour of one square',
+      all.every(str => { const d = C.decode(str); return C.minSize(d.N, d.regions) >= 2; }));
   }
 }
 
