@@ -25,9 +25,17 @@ full-screen app with its own icon.
 ## Building the puzzles
 
 ```
-node queens-tools/test.js     # engine checks and generation timings
-node queens-tools/build.js    # regenerates queens-site/levels.js
+node tools/test.js                     # engine checks and generation timings
+node tools/build.js                    # regenerates levels.js
+node tools/mirror.js [out.html]        # refreshes core.js, and writes the single-file mirror
+python3 tools/icons.py .               # regenerates the app icons
 ```
 
-`queens-tools/core.js` holds the board model, the solution counter, the
-technique-based rater and the generator, and is the same file the page loads.
+`tools/core.js` holds the board model, the solution counter, the
+technique-based rater and the generator. The page cannot `require` it, so
+`core.js` at the root is a copy that `tools/mirror.js` refreshes and
+`tools/test.js` refuses to let drift. Edit the one under `tools/`.
+
+`tools/build.js` is seeded, so rebuilding produces the same 210 puzzles.
+Each one is re-decoded from its codec string and re-proved to have a single
+solution reachable without guessing before it is written.
