@@ -158,6 +158,20 @@
   /* the "that crown is wrong" hint lands on a square that already has a crown;
      no ghost crown on top of the real one */
   .cell.hinted[data-mark="2"] .hint svg { display: none; }
+  /* That hint also lands on a crown that is usually clashing, and the red wash
+     already owns ::after there. So it marks with the .hint span instead and the
+     red shows through underneath; the cell ring only appears when there is no
+     red to keep. */
+  .cell.wronghint:not(.bad)::after {
+    content: ''; position: absolute; inset: 0;
+    box-shadow: inset 0 0 0 var(--thick) #ffffff, inset 0 0 0 calc(var(--thick) * 2) #101319;
+  }
+  .cell.wronghint .hint { opacity: 1; }
+  .cell.wronghint .hint svg { display: none; }
+  .cell.wronghint .hint::before {
+    content: ''; position: absolute; inset: 16%; border-radius: 50%;
+    border: 3px solid #ffffff; box-shadow: 0 0 0 1.5px rgba(16,19,25,.75);
+  }
 
   /* ---------------------------------------------------------- panel */
   .panel { width: var(--board); display: grid; gap: 14px; align-content: start; }
@@ -294,6 +308,11 @@
       opacity: 0; animation: hintRing 1.15s ease-out 2;
     }
     .cell.hinted .hint::after { animation-delay: .3s; }
+    .cell.wronghint .hint::after {
+      content: ''; position: absolute; inset: 16%; border-radius: 50%;
+      border: 3px solid #ffffff; box-shadow: 0 0 0 1.5px rgba(16,19,25,.75);
+      opacity: 0; animation: hintRing 1.15s ease-out 2;
+    }
     @keyframes hintRing { 0% { opacity: 0; transform: scale(.55); } 18% { opacity: .9; } 100% { opacity: 0; transform: scale(1.35); } }
     .veil { animation: veilIn 160ms ease-out; }
     .veil .sheet { animation: popIn 230ms cubic-bezier(.2,.8,.3,1.1) both; }
@@ -523,7 +542,7 @@
   let autoX = true, showTimer = true;
   let mode = 'campaign', level = 0, randSize = 8, randBand = 0, randCode = null;
   let progress = {}, bests = {}, levelBests = {};
-  let hintCell = -1;
+  let hintCell = -1, hintKind = '';
   let doneUnits = new Set();  // rows, columns and colours that already have their crown
   let elim = null;            // cells each crown rules out, for auto X
 
@@ -786,7 +805,11 @@
       const el = cells[i];
       if (el.dataset.mark !== String(marks[i])) el.dataset.mark = String(marks[i]);
       el.classList.toggle('bad', bad.has(i));
-      el.classList.toggle('hinted', i === hintCell && !bad.has(i));
+      const isHint = i === hintCell;
+      // the red-wins guard still applies to the ordinary hint, which shares
+      // ::after with .bad; the wrong-crown hint does not, so it is never dropped
+      el.classList.toggle('hinted', isHint && hintKind !== 'wrong' && !bad.has(i));
+      el.classList.toggle('wronghint', isHint && hintKind === 'wrong');
     }
   }
   function paintPanel() {
@@ -919,6 +942,7 @@
     const line = $('hintLine');
     if (!h) { line.textContent = t('whyDone'); line.classList.remove('warn'); return; }
     hintCell = h.r * P.N + h.c;
+    hintKind = h.kind;
     if (h.kind === 'wrong') { line.textContent = t('whyWrong'); line.classList.add('warn'); }
     else {
       line.classList.remove('warn');
