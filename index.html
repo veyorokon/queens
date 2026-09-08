@@ -154,11 +154,21 @@
   /* ---------------------------------------------------------- panel */
   .panel { width: var(--board); display: grid; gap: 14px; align-content: start; }
   @media (orientation: landscape) and (min-width: 760px) { .panel { width: auto; gap: 16px; } }
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-  .stat { display: grid; gap: 2px; }
+  .statsblock { display: grid; gap: 2px; }
+  .stats { display: flex; gap: 10px; }
+  .stat { flex: 1 1 0; min-width: 0; display: grid; gap: 2px; }
   .stat span { font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
   .stat b { font-size: 22px; font-weight: 700; }
   .stat.mistakes.has b { color: var(--wrong); }
+  /* the clock is a quiet number, not a score, and it can be sent away entirely */
+  .stat.time b { font-size: 17px; font-weight: 400; color: var(--ink-soft); }
+  button.quiet {
+    justify-self: end; font: inherit; font-family: var(--font-ui); font-size: 14px;
+    color: var(--ink-soft); background: none; border: 0; border-radius: 8px;
+    padding: 4px 6px; min-height: 40px; cursor: pointer; touch-action: manipulation;
+    text-decoration: underline; text-underline-offset: 3px;
+  }
+  button.quiet:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
   .tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
   button.tool {
@@ -261,10 +271,13 @@
     <div class="board-wrap"><div class="board" id="board" role="grid" aria-label="Queens board"></div></div>
 
     <aside class="panel">
-      <div class="stats">
-        <div class="stat"><span data-i18n="puzzle">Puzzle</span><b id="puzzleLabel">1</b></div>
-        <div class="stat"><span data-i18n="time">Time</span><b id="timer">0:00</b></div>
-        <div class="stat mistakes" id="mistakesWrap"><span data-i18n="mistakes">Mistakes</span><b id="mistakes">0</b></div>
+      <div class="statsblock">
+        <div class="stats">
+          <div class="stat"><span data-i18n="puzzle">Puzzle</span><b id="puzzleLabel">1</b></div>
+          <div class="stat time" id="timeWrap"><span data-i18n="time">Time</span><b id="timer">0:00</b></div>
+          <div class="stat mistakes" id="mistakesWrap"><span data-i18n="mistakes">Mistakes</span><b id="mistakes">0</b></div>
+        </div>
+        <button class="quiet" id="timerBtn" type="button">Hide timer</button>
       </div>
 
       <div class="tools">
@@ -354,6 +367,7 @@
       status: 'One crown in every row, every column and every colour. Crowns may never touch.',
       puzzle: 'Puzzle', time: 'Time', mistakes: 'Mistakes',
       undo: 'Undo', hint: 'Hint', clear: 'Clear', autoX: 'Auto X', on: 'on', off: 'off',
+      hideTimer: 'Hide timer', showTimer: 'Show timer',
       campaign: 'Campaign', random: 'Random', size: 'Size', difficulty: 'Difficulty',
       easy: 'Easy', medium: 'Medium', hard: 'Hard', newPuzzle: 'New puzzle',
       levelWhere: 'Level {n} of {total}', randomWhere: 'Random {size}',
@@ -383,6 +397,7 @@
       status: 'در هر سطر، هر ستون و هر رنگ یک تاج بگذارید. تاج‌ها نباید به هم بچسبند.',
       puzzle: 'معما', time: 'زمان', mistakes: 'اشتباه',
       undo: 'برگشت', hint: 'راهنمایی', clear: 'پاک کردن', autoX: 'ضربدر خودکار', on: 'روشن', off: 'خاموش',
+      hideTimer: 'پنهان کردن زمان', showTimer: 'نمایش زمان',
       campaign: 'مرحله‌ها', random: 'اتفاقی', size: 'اندازه', difficulty: 'سختی',
       easy: 'آسان', medium: 'متوسط', hard: 'سخت', newPuzzle: 'معمای تازه',
       levelWhere: 'مرحله {n} از {total}', randomWhere: 'اتفاقی {size}',
@@ -435,7 +450,7 @@
   let owners = null;          // who put each cross there: 'u' for the player, else a crown's cell index
   let history = [];
   let mistakes = 0, started = 0, elapsed = 0, running = false, solved = false;
-  let autoX = true;
+  let autoX = true, showTimer = true;
   let mode = 'campaign', level = 0, randSize = 8, randBand = 0, randCode = null;
   let progress = {}, bests = {};
   let hintCell = -1;
@@ -447,7 +462,7 @@
         mode, level, randSize, randBand, randCode,
         code: P ? C.encode(P) : null,
         marks: marks ? Array.from(marks).join('') : null,
-        owners, mistakes, elapsed, solved, autoX, progress, bests,
+        owners, mistakes, elapsed, solved, autoX, showTimer, progress, bests,
       }));
     } catch (e) {}
   };
@@ -598,9 +613,10 @@
     if (mode === 'campaign') progress[level] = true;
     save();
     $('solvedTime').textContent = clock(secs);
+    $('solvedTime').hidden = !showTimer;
     const noteKey = mistakes === 0 ? 'solvedNoteClean' : mistakes === 1 ? 'solvedNote1' : 'solvedNote';
     $('solvedNote').textContent = t(noteKey, { size: sizeLabel(P.N), m: faNum(mistakes) })
-      + (better ? ' ' + t('newBest', { size: sizeLabel(P.N) }) : '');
+      + (better && showTimer ? ' ' + t('newBest', { size: sizeLabel(P.N) }) : '');
     paintPanel();
     show('solvedDialog');
   }
@@ -617,7 +633,7 @@
     }
   }
   function paintPanel() {
-    $('timer').textContent = clock(nowElapsed());
+    if (showTimer) $('timer').textContent = clock(nowElapsed());
     $('mistakes').textContent = faNum(mistakes);
     $('mistakesWrap').classList.toggle('has', mistakes > 0);
     $('undoBtn').disabled = !history.length || solved;
@@ -635,22 +651,37 @@
       $('levelBand').textContent = t(bandName);
     }
     const b = bests[String(P.N)];
+    $('record').hidden = !showTimer;
     $('record').textContent = b == null ? t('noBest') : t('best', { size: sizeLabel(P.N), t: clock(b) });
     for (const el of document.querySelectorAll('.sizes .seg')) el.classList.toggle('on', +el.dataset.size === randSize);
   }
 
   // ------------------------------------------------------------- pointer
   const board = $('board');
-  let downCell = -1, dragging = false, paintMode = null;
+  let downCell = -1, dragging = false, paintMode = null, geo = null;
+  // Squares are found by arithmetic rather than by hit-testing the element, so
+  // the gaps, the thick colour borders and a band just outside the board all
+  // land on the nearest square instead of on nothing.
+  const SLOP = 14;
+  function measure() {
+    const r = board.getBoundingClientRect();
+    const bw = parseFloat(getComputedStyle(board).borderTopWidth) || 0;
+    return { left: r.left + bw, top: r.top + bw, w: r.width - bw * 2, h: r.height - bw * 2, n: P.N };
+  }
   const cellAt = (x, y) => {
-    const el = document.elementFromPoint(x, y);
-    const c = el && el.closest ? el.closest('.cell') : null;
-    return c && c.parentElement === board ? +c.dataset.i : -1;
+    if (!P) return -1;
+    const g = geo || measure();
+    if (x < g.left - SLOP || x > g.left + g.w + SLOP) return -1;
+    if (y < g.top - SLOP || y > g.top + g.h + SLOP) return -1;
+    const c = Math.min(g.n - 1, Math.max(0, Math.floor((x - g.left) / (g.w / g.n))));
+    const r = Math.min(g.n - 1, Math.max(0, Math.floor((y - g.top) / (g.h / g.n))));
+    return r * g.n + c;
   };
   board.addEventListener('pointerdown', e => {
     if (solved) return;
+    geo = measure();
     const i = cellAt(e.clientX, e.clientY);
-    if (i < 0) return;
+    if (i < 0) { geo = null; return; }
     downCell = i; dragging = false; paintMode = null;
     try { board.setPointerCapture(e.pointerId); } catch (err) {}
     e.preventDefault();
@@ -674,13 +705,14 @@
   const endDrag = e => {
     if (downCell < 0) return;
     const start = downCell;
-    downCell = -1;
+    downCell = -1; geo = null;
     try { board.releasePointerCapture(e.pointerId); } catch (err) {}
     if (dragging) { dragging = false; afterMove(-1); }
     else cycle(start);
   };
   board.addEventListener('pointerup', endDrag);
-  board.addEventListener('pointercancel', () => { downCell = -1; dragging = false; });
+  board.addEventListener('pointercancel', () => { downCell = -1; dragging = false; geo = null; });
+  addEventListener('resize', () => { geo = null; });
   function applyPaint(i) {
     if (paintMode === 'paint') { if (marks[i] === 0) setCross(i, 'u'); }
     else if (marks[i] === 1) clearCell(i);
@@ -700,6 +732,13 @@
     hintCell = -1;
     paint(); paintPanel(); save();
   });
+  function applyTimerVisibility() {
+    $('timeWrap').hidden = !showTimer;
+    $('timerBtn').textContent = t(showTimer ? 'hideTimer' : 'showTimer');
+    if (P) paintPanel();
+  }
+  // the clock never ends a puzzle; hiding it just takes the number off the panel
+  $('timerBtn').addEventListener('click', () => { showTimer = !showTimer; applyTimerVisibility(); save(); });
   $('clearBtn').addEventListener('click', () => show('confirmDialog'));
   $('confirmNo').addEventListener('click', () => hide('confirmDialog'));
   $('confirmYes').addEventListener('click', () => {
@@ -840,6 +879,7 @@
     $('langBtn').textContent = t('other');
     $('themeBtn').textContent = isDark() ? t('light') : t('dark');
     for (const el of document.querySelectorAll('.sizes .seg')) el.textContent = faNum(el.dataset.size);
+    $('timerBtn').textContent = t(showTimer ? 'hideTimer' : 'showTimer');
     if (P) paintPanel();
     if (!$('helpDialog').hidden) buildDemos();
     try { localStorage.setItem(LANG_KEY, lang); } catch (e) {}
@@ -861,10 +901,12 @@
     randBand = Math.min(2, Math.max(0, saved.randBand | 0));
     randCode = saved.randCode || null;
     autoX = saved.autoX !== false;
+    showTimer = saved.showTimer !== false;
     progress = saved.progress || {};
     bests = saved.bests || {};
   }
   setMode(mode);
+  applyTimerVisibility();
   diff.value = String(randBand);
   paintSlider();
   if (saved && saved.code) {
@@ -880,7 +922,7 @@
   else goLevel(level);
   applyLang();
 
-  setInterval(() => { if (running && !solved) { $('timer').textContent = clock(nowElapsed()); } }, 500);
+  setInterval(() => { if (running && !solved && showTimer) $('timer').textContent = clock(nowElapsed()); }, 500);
   document.addEventListener('visibilitychange', () => { if (document.hidden) { stopClock(); save(); } });
 })();
 </script>
