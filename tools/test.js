@@ -198,8 +198,47 @@ head('6. hints');
   ok('following hints alone solves a puzzle', placed.length === N, placed.length + '/' + N);
 }
 
-// ------------------------------------------------------------ 7. timings
-head('7. generation timing per size (average over 25 puzzles)');
+// ------------------------------------------------- 7. the wrong-crown hint
+head('7. the wrong-crown hint');
+{
+  // "That crown is in the wrong place" points at a crown, and a wrong crown is
+  // usually a clashing one too. It marked nothing in exactly that case: the
+  // marker shared ::after with the red wash and was suppressed to stop it
+  // painting over, so the sentence named a square carrying no mark. Both
+  // halves are pinned here, the engine reporting the case and the page
+  // marking it.
+  const rnd = C.makeRng(8080);
+  const made = [];
+  while (made.length < 15) { const p = C.makePuzzle(7 + (made.length % 4), rnd); if (p) made.push(p); }
+  let reported = 0;
+  for (const p of made) {
+    const N = p.N;
+    // two crowns off the answer sharing a column, so they clash with each other
+    let col = -1;
+    for (let c = 0; c < N && col < 0; c++) if (c !== p.sol[0] && c !== p.sol[3]) col = c;
+    const queens = [0 * N + col, 3 * N + col];
+    const clashing = C.conflicts(N, p.regions, queens);
+    const h = C.hint(N, p.regions, p.sol, queens);
+    const at = h ? h.r * N + h.c : -1;
+    if (h && h.kind === 'wrong' && clashing.has(at)) reported++;
+  }
+  ok('a wrong crown that also clashes is still reported as wrong', reported === 15, reported + '/15');
+
+  const page = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const toggle = (page.match(/^.*classList\.toggle\('wronghint'.*$/m) || [''])[0];
+  ok('the page marks that crown with a class of its own', toggle !== '');
+  // the entire bug was this one condition, so it is the one worth pinning
+  ok('the marker is not suppressed by the conflict set', toggle !== '' && !/\bbad\b/.test(toggle), toggle.trim());
+  const beforeMotion = page.slice(0, page.indexOf('@media (prefers-reduced-motion'));
+  ok('the marker shows with motion turned off too',
+    /\.cell\.wronghint \.hint \{[^}]*opacity: 1/.test(beforeMotion));
+  // .bad owns ::after on those squares; the marker must not take it back
+  ok('the red keeps ::after on a crown that is clashing',
+    /\.cell\.wronghint:not\(\.bad\)::after/.test(page) && !/\.cell\.wronghint::after/.test(page));
+}
+
+// ------------------------------------------------------------ 8. timings
+head('8. generation timing per size (average over 25 puzzles)');
 {
   const rows = [];
   for (const N of [7, 8, 9, 10]) {
