@@ -15,7 +15,7 @@
 <title>Kitchen Table Queens</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Vazirmatn:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
 <style>
   :root {
     color-scheme: light;
@@ -43,8 +43,6 @@
     --reg0: #f4cf5e; --reg1: #7cb6e8; --reg2: #f6aec2; --reg3: #86cd92; --reg4: #bda0e8;
     --reg5: #ef9350; --reg6: #59c4be; --reg7: #d7cbb3; --reg8: #b94b57; --reg9: #6d77c8;
   }
-  :root[lang="fa"] { --font-ui: 'Vazirmatn', 'Geeza Pro', 'Noto Naskh Arabic', 'Helvetica Neue', sans-serif; }
-  :root[lang="fa"] .stat span, :root[lang="fa"] .seg small, :root[lang="fa"] .field > span { text-transform: none; letter-spacing: 0; }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       color-scheme: dark;
@@ -333,7 +331,6 @@
     <h1><svg aria-hidden="true"><use href="#crown"></use></svg><span data-i18n="title">Kitchen Table Queens</span></h1>
     <div class="right">
       <div class="sub" id="status"></div>
-      <button class="pill" id="langBtn" type="button">فارسی</button>
       <button class="pill" id="themeBtn" type="button">Light</button>
     </div>
   </header>
@@ -446,7 +443,7 @@
   // ------------------------------------------------------------- language
   const STR = {
     en: {
-      title: 'Kitchen Table Queens', other: 'فارسی', dark: 'Dark', light: 'Light',
+      title: 'Kitchen Table Queens', dark: 'Dark', light: 'Light',
       status: 'One crown in every row, every column and every colour. Crowns may never touch.',
       puzzle: 'Puzzle', time: 'Time', mistakes: 'Mistakes',
       undo: 'Undo', hint: 'Hint', clear: 'Clear', autoX: 'Auto X', on: 'on', off: 'off',
@@ -478,44 +475,10 @@
       r4: 'With Auto X on, a crown crosses out its own row, column and colour, and its neighbours, for you. Take that crown off and those crosses come off with it.',
       c4: 'One crown, and the board marks everything the crown rules out.',
     },
-    fa: {
-      title: 'بازی ملکه‌ها', other: 'English', dark: 'تیره', light: 'روشن',
-      status: 'در هر سطر، هر ستون و هر رنگ یک تاج بگذارید. تاج‌ها نباید به هم بچسبند.',
-      puzzle: 'معما', time: 'زمان', mistakes: 'اشتباه',
-      undo: 'برگشت', hint: 'راهنمایی', clear: 'پاک کردن', autoX: 'ضربدر خودکار', on: 'روشن', off: 'خاموش',
-      hideTimer: 'پنهان کردن زمان', showTimer: 'نمایش زمان',
-      campaign: 'مرحله‌ها', random: 'اتفاقی', size: 'اندازه', difficulty: 'سختی',
-      easy: 'آسان', medium: 'متوسط', hard: 'سخت', newPuzzle: 'معمای تازه',
-      levelWhere: 'مرحله {n} از {total}', randomWhere: 'اتفاقی {size}',
-      solvedBadge: 'حل شده', help: 'راهنمای بازی', gotIt: 'فهمیدم',
-      allLevels: 'همهٔ معماها', close: 'بستن',
-      mapText: 'روی هر معما بزنید تا همان را بازی کنید. هیچ‌کدام قفل نیست.',
-      clearTitle: 'صفحه پاک شود؟', clearText: 'همه تاج‌ها و ضربدرها برداشته می‌شوند. زمان همچنان می‌رود.',
-      keep: 'ادامه بازی', clearYes: 'پاک کن',
-      solvedTitle: 'حل شد!', solvedNote: 'صفحه {size} با {m} اشتباه.', solvedNote1: 'صفحه {size} با یک اشتباه.', solvedNoteClean: 'صفحه {size} بدون هیچ اشتباهی.',
-      newBest: 'بهترین زمان شما روی صفحه {size}.', look: 'نگاه کنم', nextLevel: 'معمای بعد',
-      newBestLevel: 'بهترین زمان شما روی این معما.', yourBest: 'بهترین زمان شما روی این معما {t} است.',
-      best: 'بهترین {size}: {t}', noBest: 'یک صفحه را تمام کنید تا بهترین زمانتان اینجا بیاید.',
-      whyRow: 'در این سطر فقط همین یک خانه مانده.',
-      whyCol: 'در این ستون فقط همین یک خانه مانده.',
-      whyRegion: 'در این رنگ فقط همین یک خانه مانده.',
-      whySol: 'تاج این سطر همین‌جا می‌نشیند.',
-      whyWrong: 'تاجی که علامت خورده سر جایش نیست. آن را بردارید.',
-      whyDone: 'همه تاج‌ها گذاشته شده‌اند.',
-      r1: 'در هر سطر و هر ستون دقیقاً یک تاج می‌نشیند. یک بار روی خانه بزنید تا ضربدر بخورد، دو بار تا تاج بگذارید، یک بار دیگر تا پاک شود. با کشیدن انگشت چند خانه را با هم ضربدر بزنید.',
-      c1: 'چهار تاج روی صفحهٔ چهارخانه: در هر سطر یکی، در هر ستون یکی.',
-      r2: 'در هر رنگ هم دقیقاً یک تاج می‌نشیند. همین قسمت است که کار را به معما تبدیل می‌کند.',
-      c2: 'همان چهار تاج، این بار در هر کدام از چهار رنگ یکی.',
-      r3: 'تاج‌ها هرگز نباید به هم بچسبند، حتی از گوشه. همهٔ خانه‌های دور یک تاج حذف می‌شوند.',
-      c3: 'تاج وسط، هر هشت خانهٔ اطرافش را حذف می‌کند.',
-      r4: 'وقتی «ضربدر خودکار» روشن است، هر تاج، سطر و ستون و رنگ خودش و همسایه‌هایش را ضربدر می‌زند. تاج را که بردارید، همان ضربدرها هم برداشته می‌شوند.',
-      c4: 'یک تاج، و صفحه هر خانه‌ای را که آن تاج حذف می‌کند علامت می‌زند.',
-    },
   };
   const KEY = 'kitchen-table-queens';
-  const LANG_KEY = KEY + '-lang', THEME_KEY = KEY + '-theme';
-  let lang = 'en';
-  try { const v = localStorage.getItem(LANG_KEY); if (STR[v]) lang = v; } catch (e) {}
+  const THEME_KEY = KEY + '-theme';
+  const lang = 'en';
   const t = (k, vars) => (STR[lang][k] || STR.en[k] || k).replace(/\{(\w+)\}/g, (m, v) => (vars && vars[v] != null) ? vars[v] : m);
   const faNum = s => lang === 'fa' ? String(s).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]) : String(s);
   const sizeLabel = n => faNum(n + '×' + n);
@@ -1105,16 +1068,13 @@
     for (const el of document.querySelectorAll('header, aside.panel, .sheet')) el.dir = dir;
     for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
     $('status').textContent = t('status');
-    $('langBtn').textContent = t('other');
     $('themeBtn').textContent = isDark() ? t('light') : t('dark');
     for (const el of document.querySelectorAll('.sizes .seg')) el.textContent = faNum(el.dataset.size);
     $('timerBtn').textContent = t(showTimer ? 'hideTimer' : 'showTimer');
     if (P) paintPanel();
     if (!$('helpDialog').hidden) buildDemos();
     if (!$('mapDialog').hidden) buildMap();
-    try { localStorage.setItem(LANG_KEY, lang); } catch (e) {}
   }
-  $('langBtn').addEventListener('click', () => { lang = lang === 'fa' ? 'en' : 'fa'; applyLang(); });
   $('themeBtn').addEventListener('click', () => {
     const m = isDark() ? 'light' : 'dark';
     applyTheme(m);
