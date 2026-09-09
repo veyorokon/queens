@@ -112,7 +112,18 @@
   }
 
   /* ---------------------------------------------------------- board */
-  .board-wrap { width: var(--board); }
+  /* coordinates: letters across the top, numbers down the left, so a square
+     can be named out loud ("C5") while talking a board through */
+  .board-wrap {
+    --gutter: clamp(18px, calc(var(--cell) * .34), 26px);
+    width: var(--board);
+    display: grid; grid-template-columns: var(--gutter) 1fr; grid-template-rows: var(--gutter) 1fr;
+  }
+  .coords { display: grid; font-family: var(--font-ui); font-size: clamp(11px, calc(var(--gutter) * .58), 15px); font-weight: 700; color: var(--ink-soft); letter-spacing: .04em; font-variant-numeric: tabular-nums; user-select: none; -webkit-user-select: none; pointer-events: none; }
+  .coords.top { grid-column: 2; grid-row: 1; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); align-items: end; padding: 0 var(--thick) 3px; }
+  .coords.left { grid-column: 1; grid-row: 2; grid-template-rows: repeat(var(--n), minmax(0, 1fr)); align-items: center; justify-items: end; padding: var(--thick) 5px var(--thick) 0; }
+  .coords span { text-align: center; min-width: 0; }
+  .board-wrap .board { grid-column: 2; grid-row: 2; }
   .board {
     display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); grid-template-rows: repeat(var(--n), minmax(0, 1fr)); aspect-ratio: 1;
     gap: 1px; background: var(--line-thin);
@@ -336,7 +347,7 @@
   </header>
 
   <main class="play">
-    <div class="board-wrap"><div class="board" id="board" role="grid" aria-label="Queens board"></div></div>
+    <div class="board-wrap"><div class="coords top" id="coordsTop" aria-hidden="true"></div><div class="coords left" id="coordsLeft" aria-hidden="true"></div><div class="board" id="board" role="grid" aria-label="Queens board"></div></div>
 
     <aside class="panel">
       <div class="statsblock">
@@ -590,11 +601,14 @@
   }
 
   // ----------------------------------------------------------- board build
+  const colName = c => String.fromCharCode(65 + c);
   function buildBoard() {
     const N = P.N, board = $('board');
     document.querySelector('.app').style.setProperty('--n', N);
     board.style.setProperty('--n', N);
     board.textContent = '';
+    $('coordsTop').innerHTML = Array.from({ length: N }, (_, c) => '<span>' + colName(c) + '</span>').join('');
+    $('coordsLeft').innerHTML = Array.from({ length: N }, (_, r) => '<span>' + (r + 1) + '</span>').join('');
     for (let i = 0; i < N * N; i++) {
       const r = (i / N) | 0, c = i % N, g = P.regions[i];
       const b = document.createElement('button');
@@ -610,7 +624,7 @@
       if (c > 0 && P.regions[i - 1] !== g) parts.push('inset var(--thick) 0 0 0 var(--edge)');
       if (c < N - 1 && P.regions[i + 1] !== g) parts.push('inset calc(-1 * var(--thick)) 0 0 0 var(--edge)');
       b.style.setProperty('--edges', parts.length ? parts.join(',') : 'none');
-      b.setAttribute('aria-label', 'row ' + (r + 1) + ' column ' + (c + 1));
+      b.setAttribute('aria-label', colName(c) + (r + 1) + ', row ' + (r + 1) + ' column ' + colName(c));
       b.innerHTML = '<svg class="crown" aria-hidden="true"><use href="#crown"></use></svg><span class="x"></span>'
         + '<span class="hint"><svg aria-hidden="true"><use href="#crown"></use></svg></span>';
       board.appendChild(b);
