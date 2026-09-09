@@ -199,6 +199,17 @@
   }
   /* the crosses a hint is offering, not yet made */
   .cell.ghost .x { opacity: .42; }
+  /* A crown the hint is only supposing, while it walks a what-if. It is the
+     same white-on-near-black glyph as the hint marker, so it reads on all ten
+     colours in both themes, but drawn back and sitting inside a dashed ring:
+     a crown she has actually placed is solid and has no ring, so the two can
+     never be taken for each other on a board that holds both. */
+  .cell.trycrown .hint { opacity: .55; }
+  .cell.trycrown .wash {
+    outline: 2px dashed #ffffff; outline-offset: calc(-1 * var(--thick) - 2px);
+    filter: drop-shadow(0 0 1.5px rgba(16,19,25,.9));
+  }
+  .cell.trycrown[data-mark="2"] .hint svg { display: none; }
 
   /* ---------------------------------------------------------- panel */
   .panel { width: var(--board); display: grid; gap: 14px; align-content: start; }
@@ -521,6 +532,7 @@
       whyRegion: 'Only one square is left in this colour.',
       whySol: "This row's crown belongs here.",
       whyWrong: 'The crown on the marked square is in the wrong place. Take it off.',
+      whyWrongCross: 'That cross on {cell} is wrong. A crown goes there. Tap it to clear it.',
       whyDone: 'Every crown is already placed.',
       r1: 'Every row and every column gets exactly one crown. Tap a square once for a cross, twice for a crown, once more to clear it. Drag your finger to cross out several squares at a time.',
       c1: 'Four crowns on a four-square board: one in every row, one in every column.',
@@ -563,6 +575,7 @@
   let progress = {}, bests = {}, levelBests = {};
   let hintCell = -1, hintKind = '';
   let hintStep = null, hintStage = 0, hintFx = null;   // the staged hint
+  let hintStages = null;      // the taps that walk it, one at a time
   let replay = null;          // the worked solution, replayed after a win
   let doneUnits = new Set();  // rows, columns and colours that already have their crown
   let elim = null;            // cells each crown rules out, for auto X
@@ -573,11 +586,13 @@
       code: P ? C.encode(P) : null,
       marks: marks ? Array.from(marks).join('') : null,
       owners, mistakes, elapsed, solved, autoX, showTimer, bests,
-      // The campaign was regenerated when the difficulty bands were fixed, so
-      // level 12 is no longer the board it used to be. Per-level progress and
-      // records move to fresh keys rather than crediting boards nobody played;
-      // per-size records and the preferences keep their old ones.
-      progress2: progress, levelBests2: levelBests,
+      // The campaign was regenerated again when every board that needed a
+      // what-if nobody could follow was thrown out and the bands stopped being
+      // capped below the work they ask for. Level 12 is not the board it was,
+      // so per-level progress and records move to fresh keys rather than
+      // crediting boards nobody played; per-size records and the preferences
+      // keep their old ones.
+      progress3: progress, levelBests3: levelBests,
     };
     // The undo stack is stored with the board, so closing the tab mid-puzzle does
     // not cost her the moves she might want back. Only the last 40 moves go to
@@ -855,6 +870,7 @@
       el.classList.toggle('lit', !!fx && fx.lit.has(i));
       el.classList.toggle('focus', !!fx && fx.focus.has(i));
       el.classList.toggle('ghost', !!fx && fx.ghost.has(i) && view[i] === 0);
+      el.classList.toggle('trycrown', !!fx && !!fx.crown && fx.crown.has(i) && view[i] !== 2);
     }
   }
   function paintPanel() {
@@ -996,16 +1012,40 @@
   };
   const unitKeyOf = u => (u.kind === 'row' ? 'r' : u.kind === 'col' ? 'c' : 'g') + u.k;
   function hintFxOf(w, ghosts) {
-    const lit = new Set(), focus = new Set(), ghost = new Set();
+    const lit = new Set(), focus = new Set(), ghost = new Set(), crown = new Set();
     for (const u of w.units || []) for (const i of unitCells(unitKeyOf(u))) lit.add(i);
     // only the rules that turn on two or three named squares ring anything;
     // everywhere else the wash over the units has already said it
     for (const i of w.ring || []) focus.add(i);
+    // the crowns a what-if is supposing, drawn as ghosts while it is walked
+    for (const i of w.crown || []) crown.add(i);
     for (const i of ghosts || []) ghost.add(i);
-    return { lit: lit, focus: focus, ghost: ghost };
+    return { lit: lit, focus: focus, ghost: ghost, crown: crown };
+  }
+
+  // A what-if that forces more than one crown is walked one crown a tap: the
+  // try, then each crown it forces with the reason it was forced, then the unit
+  // that runs out. Nobody can follow five crowns from one sentence, so no tap
+  // ever adds more than one of them. Every other rule keeps the two taps it
+  // always had: the rule, then the crosses it offers.
+  const isWalked = w => w.rule === 'whatif' && !!w.cascadeText && w.cascadeText.length > 1;
+  function stagesOf(w) {
+    const units = w.units || [], ring = w.ring || [];
+    if (!isWalked(w)) {
+      return [{ text: w.text, units: units, ring: ring, crown: [] },
+              { text: w.text, units: units, ring: ring, crown: [], offer: true }];
+    }
+    const crowns = [w.trigger];
+    const out = [{ text: w.tryText, units: [], ring: [w.trigger], crown: crowns.slice() }];
+    for (const s of w.cascadeText) {
+      crowns.push(s.cell);
+      out.push({ text: s.text, units: [s.unit], ring: [w.trigger], crown: crowns.slice() });
+    }
+    out.push({ text: w.endText, units: units, ring: [w.trigger], crown: crowns.slice(), offer: true });
+    return out;
   }
   function clearHint(keepLine) {
-    hintCell = -1; hintKind = ''; hintStep = null; hintStage = 0; hintFx = null;
+    hintCell = -1; hintKind = ''; hintStep = null; hintStage = 0; hintFx = null; hintStages = null;
     $('hintApply').hidden = true;
     if (!keepLine) { $('hintLine').textContent = ''; $('hintLine').classList.remove('warn'); }
   }
@@ -1050,24 +1090,26 @@
       paint();
       return;
     }
-    // a crown that can be proved right now needs no stages
-    if (w.place) { clearHint(true); showCrown(w); paint(); return; }
-    if (!hintStep || hintStep.text !== w.text) { clearHint(true); hintStep = w; hintStage = 0; }
-    const step = hintStep;
-    hintStage++;
-    if (hintStage === 1) {
-      hintFx = hintFxOf(step, null);
-      sayHint(step.text, false);
-      $('hintApply').hidden = true;
-    } else if (hintStage === 2) {
-      const todo = hintTodo(step);
-      hintFx = hintFxOf(step, todo);
-      sayHint(step.text + ' ' + C.sayCrosses(P.N, todo), false);
-      $('hintApply').hidden = false;
-    } else {
-      finishStep(step);
+    // a cross on a square the crown belongs on is the same kind of mistake, and
+    // the same kind of answer: nothing else is said until it comes off
+    if (w.rule === 'wrongcross') {
+      clearHint(true);
+      hintCell = w.r * P.N + w.c; hintKind = 'wrong';
+      sayHint(t('whyWrongCross', { cell: C.cellName(P.N, hintCell) }), true);
+      paint();
       return;
     }
+    // a crown that can be proved right now needs no stages
+    if (w.place) { clearHint(true); showCrown(w); paint(); return; }
+    if (!hintStep || hintStep.text !== w.text) { clearHint(true); hintStep = w; hintStages = stagesOf(w); hintStage = 0; }
+    const step = hintStep;
+    hintStage++;
+    if (hintStage > hintStages.length) { finishStep(step); return; }
+    const stage = hintStages[hintStage - 1];
+    const todo = stage.offer ? hintTodo(step) : null;
+    hintFx = hintFxOf(stage, todo);
+    sayHint(stage.text + (todo && todo.length ? ' ' + C.sayCrosses(P.N, todo) : ''), false);
+    $('hintApply').hidden = !stage.offer;
     paint();
   }
   $('hintBtn').addEventListener('click', stepHint);
@@ -1090,22 +1132,34 @@
     return m;
   }
   function drawReplay() {
-    const w = replay.steps[replay.at];
-    replay.marks = replayMarks(replay.at);
+    const f = replay.frames[replay.at];
+    const w = f.step, stage = f.stage;
+    replay.marks = replayMarks(f.step_i);
     hintCell = -1; hintKind = '';
-    if (w.place) { hintCell = w.place.r * P.N + w.place.c; hintKind = 'place'; hintFx = hintFxOf(w, null); }
-    else hintFx = hintFxOf(w, w.elim);
-    $('replayText').textContent = w.text + (w.crossText ? ' ' + w.crossText : '');
-    $('replayWhere').textContent = t('replayWhere', { n: faNum(replay.at + 1), total: faNum(replay.steps.length) });
+    // only the last tap of a step shows what it crosses out; the taps before it
+    // are the what-if being walked, and the board it supposes is not hers yet
+    if (w.place) { hintCell = w.place.r * P.N + w.place.c; hintKind = 'place'; hintFx = hintFxOf(stage, null); }
+    else hintFx = hintFxOf(stage, stage.offer ? w.elim : null);
+    $('replayText').textContent = stage.text + (stage.offer && w.crossText ? ' ' + w.crossText : '');
+    $('replayWhere').textContent = t('replayWhere', { n: faNum(replay.at + 1), total: faNum(replay.frames.length) });
     $('replayBack').disabled = replay.at === 0;
-    $('replayNext').disabled = replay.at >= replay.steps.length - 1;
+    $('replayNext').disabled = replay.at >= replay.frames.length - 1;
     paint();
   }
   function startReplay() {
     const steps = C.chain(P.N, P.regions, P.sol);
     if (!steps || !steps.length) return;
     clearHint();
-    replay = { steps: steps, at: 0, marks: new Uint8Array(P.N * P.N) };
+    // the replay walks a cascade the same way the hint does, one crown a tap.
+    // Every other step is one tap, because the replay makes the crosses itself
+    // and has no offer to hold back for.
+    const frames = [];
+    steps.forEach((w, k) => {
+      const stages = stagesOf(w);
+      const use = isWalked(w) ? stages : stages.slice(-1);
+      for (const stage of use) frames.push({ step: w, step_i: k, stage: stage });
+    });
+    replay = { steps: steps, frames: frames, at: 0, marks: new Uint8Array(P.N * P.N) };
     $('replayBar').hidden = false;
     drawReplay();
   }
@@ -1117,7 +1171,7 @@
   }
   $('replayBtn').addEventListener('click', () => { hide('solvedDialog'); startReplay(); });
   $('replayBack').addEventListener('click', () => { if (replay && replay.at > 0) { replay.at--; drawReplay(); } });
-  $('replayNext').addEventListener('click', () => { if (replay && replay.at < replay.steps.length - 1) { replay.at++; drawReplay(); } });
+  $('replayNext').addEventListener('click', () => { if (replay && replay.at < replay.frames.length - 1) { replay.at++; drawReplay(); } });
   $('replayDone').addEventListener('click', endReplay);
 
   // ---------------------------------------------------------------- modes
@@ -1299,9 +1353,9 @@
     randCode = saved.randCode || null;
     autoX = saved.autoX !== false;
     showTimer = saved.showTimer !== false;
-    progress = saved.progress2 || {};
+    progress = saved.progress3 || {};
     bests = saved.bests || {};
-    levelBests = saved.levelBests2 || {};
+    levelBests = saved.levelBests3 || {};
   }
   setMode(mode);
   applyTimerVisibility();

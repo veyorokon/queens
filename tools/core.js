@@ -15,6 +15,13 @@
   // sight, so the puzzle is over before it starts. The floor rises with the
   // band, and Hard also has to be visibly even, measured as the coefficient of
   // variation of the region sizes (sd / mean, and the mean is always N).
+  // The deepest what-if a board may ever need: a crown put down, and at most
+  // this many crowns forced out of it before some unit runs out. Past two,
+  // nobody can hold the chain in their head, so the rater refuses to use a
+  // deeper disproof and a board that cannot be finished without one is
+  // rejected rather than shipped.
+  const MAX_CASCADE = 2;
+
   const SIZE_PROFILE = [
     { minRegion: 2, maxCV: Infinity },   // 0 easy
     { minRegion: 3, maxCV: Infinity },   // 1 medium
@@ -340,8 +347,12 @@
   }
 
   // "If the crown went here, that colour would have nowhere left" — a single
-  // cell tried and disproved, never a guess left standing.
-  function lookaheadPass(st) {
+  // cell tried and disproved, never a guess left standing. Only a disproof
+  // short enough to say out loud counts: the crowns the try forces before it
+  // falls over are counted, and past the cap the square is left alone, so a
+  // board that needs a longer chain comes back unsolved instead of shipping.
+  function lookaheadPass(st, maxCascade) {
+    const cap = maxCascade == null ? MAX_CASCADE : maxCascade;
     const N = st.N;
     let changed = 0;
     for (let r = 0; r < N; r++) {
@@ -350,7 +361,9 @@
         const i = r * N + c;
         if (!st.cand[i]) continue;
         const t = cloneState(st);
-        if (!place(t, r, c) || singlesPass(t) < 0) { st.cand[i] = 0; changed++; }
+        if (!place(t, r, c)) { st.cand[i] = 0; changed++; continue; }
+        const trace = { steps: [], empty: null };
+        if (singlesPass(t, trace) < 0 && trace.steps.length <= cap) { st.cand[i] = 0; changed++; }
       }
     }
     return changed;
@@ -362,10 +375,13 @@
   //   2 line confinement  a colour trapped in one line, or a line all one colour
   //   3 forced squares    a square every placement of some unit would wipe out
   //   4 disproof          put a crown down, watch a colour run out of room
-  // The band that comes out is the technique band capped by the size profile:
-  // a board with a colour under 3 squares can never be more than Easy, and one
-  // under 4 squares, or with sizes spread wider than a CV of 0.35, can never be
-  // Hard. Tier and score still order the ramp inside a band.
+  // The band that comes out is the technique band and nothing else. It used to
+  // be capped by the size profile, so a board that needed a disproof shipped as
+  // Easy because it happened to have a two-square colour, and most of the ramp
+  // was labelled below the work it asked for. The size profile is now a
+  // separate requirement the generator applies: a board whose technique band is
+  // Hard but whose colours are too small for Hard is rejected, not relabelled.
+  // Tier and score still order the ramp inside a band.
   function rate(N, regions) {
     const st = newState(N, regions);
     const rounds = [0, 0, 0, 0];
@@ -385,7 +401,7 @@
     // Effort per row of board: how much work beyond plain singles it took.
     const effort = (rounds[1] + rounds[2] * 1.6 + rounds[3] * 6) / N;
     const techBand = rounds[3] > 0 ? 2 : (effort >= 0.32 ? 1 : 0);
-    const band = Math.min(techBand, sizeCap(N, regions));
+    const band = techBand;
     return {
       solved: true, rounds, tier, effort: Math.round(effort * 100) / 100,
       techBand, band, score: Math.round(effort * 100), sol: Array.from(st.queenCol),
@@ -676,15 +692,6 @@
     for (const v of cnt) ss += (v - N) * (v - N);
     return Math.sqrt(ss / N) / N;
   }
-  // The highest band these region sizes may claim, whatever the technique
-  // solver had to do. A board with a one- or two-square colour is easy however
-  // twisty the rest of it is, because that colour is a free crown.
-  function sizeCap(N, regions) {
-    const min = minSize(N, regions);
-    if (min < SIZE_PROFILE[1].minRegion) return 0;
-    if (min < SIZE_PROFILE[2].minRegion || sizeCV(N, regions) > SIZE_PROFILE[2].maxCV) return 1;
-    return 2;
-  }
   // The profile a call is generating to: an explicit minRegion/maxCV wins,
   // otherwise the target band's, otherwise the floor every band shares.
   function profileOf(opts) {
@@ -719,6 +726,11 @@
     if (cv > prof.maxCV) return null;
     const r = rate(N, regions);
     if (!r.solved) return null;
+    // The rater proves the board can be reasoned out. This proves it can be
+    // explained: the two families run different rules, so the worked chain can
+    // still reach for a what-if the rater never needed, and one that forces
+    // more than MAX_CASCADE crowns is one nobody can follow.
+    if (!followable(N, regions, r.sol)) return null;
     return { N, regions, sol, band: r.band, score: r.score, tier: r.tier, rounds: r.rounds, sizes, cv };
   }
 
@@ -924,10 +936,29 @@
     return null;
   }
 
+  // How tight the tightest unit through a square is: the fewest squares left in
+  // its row, its column or its colour. Two disproofs of the same length are
+  // separated by this, because the one inside the unit with least room is the
+  // one she is already looking at.
+  function narrowestUnit(st, i) {
+    const N = st.N, r = (i / N) | 0, c = i % N, g = st.regions[i];
+    let row = 0, col = 0, reg = 0;
+    for (let k = 0; k < N; k++) {
+      if (st.cand[r * N + k]) row++;
+      if (st.cand[k * N + c]) col++;
+    }
+    for (let k = 0; k < N * N; k++) if (st.regions[k] === g && st.cand[k]) reg++;
+    return Math.min(row, col, reg);
+  }
+
   // 4. one step of what-if: a crown put down, singles run out from it, and a
-  //    unit left with nothing.
+  //    unit left with nothing. Every square is tried, not just the first one
+  //    that works, and the shortest disproof wins: a crown that falls over
+  //    straight away is worth saying, one that forces five more crowns first is
+  //    not. Ties go to the square in the tightest unit, then to square order.
   function stepWhatIf(st) {
     const N = st.N;
+    let best = null;
     for (let r = 0; r < N; r++) {
       if (st.queenCol[r] !== -1) continue;
       for (let c = 0; c < N; c++) {
@@ -936,16 +967,21 @@
         const t = cloneState(st);
         const trace = { steps: [], empty: null };
         if (place(t, r, c) && singlesPass(t, trace) >= 0) continue;
-        const emptied = trace.empty || { kind: 'row', k: r };
-        return {
-          rule: 'whatif', trigger: i, emptied: emptied, cascade: trace.steps,
-          units: [emptied], colours: emptied.kind === 'reg' ? [emptied.k] : [],
-          cells: [i].concat(trace.steps.map(s => s.r * N + s.c)),
-          ring: [i].concat(trace.steps.map(s => s.r * N + s.c)), elim: [i],
-        };
+        const depth = trace.steps.length;
+        if (best && depth > best.depth) continue;
+        const width = narrowestUnit(st, i);
+        if (best && (depth > best.depth || (depth === best.depth && width >= best.width))) continue;
+        best = { i: i, r: r, depth: depth, width: width, trace: trace };
       }
     }
-    return null;
+    if (!best) return null;
+    const emptied = best.trace.empty || { kind: 'row', k: best.r };
+    const forced = best.trace.steps.map(s => s.r * N + s.c);
+    return {
+      rule: 'whatif', trigger: best.i, emptied: emptied, cascade: best.trace.steps,
+      units: [emptied], colours: emptied.kind === 'reg' ? [emptied.k] : [],
+      cells: [best.i].concat(forced), ring: [best.i].concat(forced), elim: [best.i],
+    };
   }
 
   // The cheapest rule that makes progress, with its witness. Singles come
@@ -1015,10 +1051,24 @@
     } else if (w.rule === 'whatif') {
       const at = cellName(N, w.trigger), gone = unitName(w.emptied.kind, w.emptied.k);
       const n = w.cascade.length;
+      // A cascade of more than one crown is walked a tap at a time rather than
+      // read out in a lump, so the wording comes in pieces: the try, one
+      // sentence per crown it forces, and the unit that runs out at the end.
+      w.tryText = 'Try a crown at ' + at + ' and see what it forces.';
+      w.cascadeText = w.cascade.map(s => {
+        const j = s.r * N + s.c;
+        const kind = s.why === 'row' ? 'row' : s.why === 'col' ? 'col' : 'reg';
+        const k = kind === 'row' ? s.r : kind === 'col' ? s.c : st.regions[j];
+        return { unit: { kind: kind, k: k }, cell: j,
+          text: cap1(unitName(kind, k)) + ' is then down to ' + cellName(N, j) + '.' };
+      });
+      w.endText = 'And then ' + gone + ' has nowhere to go. So ' + at + ' is out.';
+      // The one line never carries more than two forced crowns. Past that it is
+      // only a summary, and the staged walk is what actually shows the chain.
       let forced = '';
       if (n === 1) forced = ' forces a crown at ' + cellName(N, w.cascade[0].r * N + w.cascade[0].c) + ',';
-      else if (n > 1 && n <= 4) forced = ' forces crowns at ' + namesOf(N, w.cascade.map(s => s.r * N + s.c), 4) + ',';
-      else if (n > 4) forced = ' forces ' + countWord(n) + ' more crowns,';
+      else if (n === 2) forced = ' forces crowns at ' + namesOf(N, w.cascade.map(s => s.r * N + s.c), 2) + ',';
+      else if (n > 2) forced = ' forces ' + countWord(n) + ' more crowns,';
       w.text = forced
         ? 'A crown at ' + at + forced + ' and then ' + gone + ' has nowhere to go.'
         : 'A crown at ' + at + ' would leave ' + gone + ' with nowhere to go.';
@@ -1029,9 +1079,13 @@
 
   // ------------------------------------------------------ the staged hint
   // The next step from the board as she has it, with its witness. A crown in
-  // the wrong place is still reported first and nothing else is looked at.
-  // `known` is the squares already crossed off; a step she has already made
-  // every cross for is applied quietly and the next one comes back instead.
+  // the wrong place is reported first and nothing else is looked at, and a
+  // cross on a square the crown belongs on comes straight after it.
+  // `known` is the squares she has crossed off. Every one of those that is not
+  // an answer square is a true fact however she got there — her own reasoning,
+  // Auto X, or a cross an earlier hint handed her — so the solver starts from
+  // them. Rebuilding from the crowns alone was what made it reach past the
+  // cheap step in front of her for something nobody could follow.
   function explain(N, regions, sol, queens, known) {
     for (const i of queens) {
       const r = (i / N) | 0, c = i % N;
@@ -1040,6 +1094,14 @@
     const st = newState(N, regions);
     for (const i of queens) if (!place(st, (i / N) | 0, i % N)) return { rule: 'wrong', kind: 'wrong', r: (i / N) | 0, c: i % N };
     const seen = known ? (known instanceof Set ? known : new Set(known)) : null;
+    if (seen) {
+      const crossed = Array.from(seen).sort((a, b) => a - b);
+      for (const i of crossed) {
+        const r = (i / N) | 0, c = i % N;
+        if (sol && sol[r] === c) return { rule: 'wrongcross', kind: 'wrongcross', r: r, c: c };
+      }
+      for (const i of crossed) if (st.queenCol[(i / N) | 0] !== i % N) st.cand[i] = 0;
+    }
     let guard = 0, w = null;
     while (guard++ < 400) {
       w = nextStep(st, sol);
@@ -1056,6 +1118,23 @@
       if (nx && nx.place) w.then = nx;
     }
     return w;
+  }
+
+  // Can the whole board be explained, and followed? The chain has to reach the
+  // answer on its own rules, and no what-if in it may force more than the cap
+  // in crowns before the contradiction. Every board is put through this before
+  // it ships.
+  function followable(N, regions, sol, cap) {
+    const limit = cap == null ? MAX_CASCADE : cap;
+    const ch = chain(N, regions, sol);
+    if (!ch) return false;
+    let crowns = 0;
+    for (const w of ch) {
+      if (w.rule === 'whatif' && w.cascade.length > limit) return false;
+      if (w.rule === 'solution') return false;
+      if (w.place) crowns++;
+    }
+    return crowns === N;
   }
 
   // Every step from an empty board to the finished one, in order. Used by the
@@ -1082,7 +1161,7 @@
     elimSets, unitsOf, rate, hint,
     explain, chain, nextStep, applyStep, sayCrosses, cellName, unitName, COLOUR_NAMES,
     randomPlacement, growRegions, altSolution, tighten, repairRegion, rebalance, regionWhole,
-    SIZE_PROFILE, regionSizes, minSize, sizeCV, sizeCap, profileOf,
+    MAX_CASCADE, SIZE_PROFILE, regionSizes, minSize, sizeCV, profileOf, followable,
     makePuzzle, generate, verify,
   };
 });
