@@ -154,18 +154,37 @@ head('5. the rater never calls a guessy board solvable');
   ok('200 boards with 0 or 2+ solutions: rater solves none of them', wrong === 0, wrong + ' solved');
   ok('none of them are labelled Easy', easyOnMulti === 0);
 
-  // band must line up with the tier of rule the solver actually needed
+  // The rater used to have a fourth rule under the other three: a crown put
+  // down and followed until something ran out. A hint cannot say that without
+  // asking her to suppose something, so it is gone, and these are the checks
+  // that it stays gone and that the bands are drawn on what is left.
   const made = [];
   const r2 = C.makeRng(515);
   while (made.length < 60) { const p = C.makePuzzle(7 + (made.length % 4), r2); if (p) made.push(p); }
-  ok('the technique band is exactly the set that needed a disproof', made.every(p => {
+  // rounds is [singles, k=1, k=2, k=3, k=4 subsets, touching]
+  ok('Easy is singles and k=1 subsets and nothing else', made.every(p => {
     const r = C.rate(p.N, p.regions);
-    return (r.techBand === 2) === (r.rounds[3] > 0);
+    return r.band !== 0 || (r.rounds[2] + r.rounds[3] + r.rounds[4] + r.rounds[5] === 0);
   }));
-  ok('a board called Hard always needed a disproof', made.every(p => {
+  ok('Medium always needs touching or a k=2 subset', made.every(p => {
     const r = C.rate(p.N, p.regions);
-    return r.band !== 2 || r.rounds[3] > 0;
+    return r.band !== 1 || r.rounds[2] + r.rounds[5] > 0;
   }));
+  ok('Medium never needs a subset wider than two', made.every(p => {
+    const r = C.rate(p.N, p.regions);
+    return r.band !== 1 || r.rounds[3] + r.rounds[4] === 0;
+  }));
+  ok('Hard needs a wide subset, or enough middling steps to cross the effort line', made.every(p => {
+    const r = C.rate(p.N, p.regions);
+    return r.band !== 2 || r.rounds[3] + r.rounds[4] > 0 || r.effort >= C.HARD_EFFORT;
+  }));
+  ok('and Hard is never just singles and k=1 subsets', made.every(p => {
+    const r = C.rate(p.N, p.regions);
+    return r.band !== 2 || r.rounds[2] + r.rounds[3] + r.rounds[4] + r.rounds[5] > 0;
+  }));
+  ok('the ramp is not vacuous: all three bands turn up in 60 boards',
+    [0, 1, 2].every(b => made.some(p => p.band === b)),
+    made.map(p => p.band).join(''));
   // The band used to be the technique band capped by the size profile, so a
   // board that needed a disproof shipped as Easy if it happened to hold a
   // two-square colour, and most of the campaign was labelled below the work it
@@ -175,31 +194,36 @@ head('5. the rater never calls a guessy board solvable');
     const r = C.rate(p.N, p.regions);
     return r.band === r.techBand;
   }));
-  // the disproof the rater is allowed to use is one that can be said out loud
+  // Every rule the rater runs is a rule the worked chain can say out loud, and
+  // the other way about, so a board the rater solves is a board the hint can
+  // carry from an empty grid to the last crown. This is what makes the flat
+  // fallback unreachable on anything that ships.
+  ok('a board the rater solves is a board the hint can explain end to end',
+    made.every(p => C.followable(p.N, p.regions, p.sol)));
   {
+    // boards the rater turns down: they are the ones whose chain has a hole in
+    // it, and the hole is filled by the flat step, which gives no reason at all
     const r4 = C.makeRng(2468);
-    let runs = 0, sound = 0, wider = 0;
-    while (runs < 60) {
-      const N = 7 + (runs % 4);
+    let unique = 0, refused = 0, allFlat = 0, finished = 0;
+    for (let k = 0; k < 3000 && refused < 6; k++) {
+      const N = 7 + (k % 4);
       const sol = C.randomPlacement(N, r4);
+      if (!sol) continue;
       const reg = C.growRegions(N, sol, r4);
-      if (!reg) continue;
-      runs++;
-      const base = C.newState(N, reg);
-      C.singlesPass(base); C.linePass(base); C.confinePass(base);
-      const capped = C.cloneState(base), loose = C.cloneState(base);
-      C.lookaheadPass(capped, C.MAX_CASCADE);
-      C.lookaheadPass(loose, 99);
-      let holds = true, held = 0;
-      for (let i = 0; i < N * N; i++) {
-        if (!capped.cand[i] && loose.cand[i]) holds = false;
-        if (capped.cand[i] && !loose.cand[i]) held++;
-      }
-      if (holds) sound++;
-      if (held) wider++;
+      if (!reg || C.minSize(N, reg) < 2) continue;
+      if (C.tighten(N, reg, sol, r4, 600, 2) < 0) continue;
+      if (C.countSolutions(N, reg, 2) !== 1) continue;
+      unique++;
+      if (C.rate(N, reg).solved) continue;
+      refused++;
+      const ch = C.chain(N, reg, sol);
+      if (ch.some(w => w.rule === 'flat')) allFlat++;
+      if (ch.filter(w => w.place).length === N) finished++;
+      if (C.followable(N, reg, sol)) allFlat = -99;
     }
-    ok('a capped disproof never rules out what an uncapped one keeps', sound === runs, sound + '/' + runs);
-    ok('and the cap really does hold longer chains back (' + wider + ' of ' + runs + ' boards)', wider > 0);
+    ok('the rater refuses a board its three rules cannot finish (' + refused + ' of ' + unique + ' unique boards)', refused > 0);
+    ok('and every one of those falls back on the flat step', allFlat === refused, allFlat + '/' + refused);
+    ok('the flat step still gets the chain to the last crown', finished === refused, finished + '/' + refused);
   }
   ok('rating is deterministic', made.every(p => C.rate(p.N, p.regions).band === C.rate(p.N, p.regions).band));
 }
@@ -445,12 +469,50 @@ head('10. every step of a hint carries a witness');
   ok('no step falls back on being told the answer', ruleless === null, ruleless || '');
   ok('every step says why, in a sentence', textless === null, textless || '');
   ok('every step that is not a crown crosses something out', noProgress === null, noProgress || '');
-  ok('all four rules turn up across the shipped boards (' + Object.keys(seenRules).sort().join(', ') + ')',
-    ['single', 'subset', 'touch', 'whatif'].every(r => seenRules[r] > 0));
-  ok('all six ordered pairs of unit kinds turn up (' + Object.keys(seenPairs).sort().join(', ') + ')',
-    Object.keys(seenPairs).length === 6);
+  ok('all three rules turn up across the shipped boards (' + Object.keys(seenRules).sort().join(', ') + ')',
+    ['single', 'subset', 'touch'].every(r => seenRules[r] > 0));
+  ok('and nothing else does: no shipped chain reaches for the flat step',
+    !seenRules.flat && !seenRules.whatif, Object.keys(seenRules).sort().join(', '));
+  // The four pairings with a colour on one side of them are the common ones,
+  // and every shipped set holds all four. A row confined to columns, or a
+  // column confined to rows, wants a board where no colour is confined at all,
+  // which turns up about once in sixty boards, so whether one lands in a given
+  // 318 is a coin toss and is not worth pinning here. That the search covers
+  // all six is pinned on a hand-made board further down instead.
+  ok('every pairing with a colour in it turns up (' + Object.keys(seenPairs).sort().join(', ') + ')',
+    ['reg->row', 'reg->col', 'row->reg', 'col->reg'].every(k => seenPairs[k]));
   ok('subsets of every size from one to four turn up (' + Object.keys(seenK).sort().join(', ') + ')',
     [1, 2, 3, 4].every(k => seenK[k]));
+
+  // All six ordered pairs of unit kinds really are searched, pinned on two
+  // hand-made boards rather than on what a build happens to throw up. Colours
+  // run down the diagonals, so no colour is ever confined to a line and the
+  // four pairings that involve one are all out of the running; what is left is
+  // two columns whose squares lie in two rows, and its mirror.
+  {
+    const N = 5;
+    const regions = new Int8Array(N * N);
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) regions[r * N + c] = (r + c) % N;
+    const build = dead => {
+      const st = C.newState(N, regions);
+      for (const i of dead) st.cand[i] = 0;
+      return C.nextStep(st, null);   // nothing is a single here, so it lands on a subset
+    };
+    // columns A and B have squares left in rows 1 and 2 only
+    const downCols = [];
+    for (let r = 2; r < N; r++) for (const c of [0, 1]) downCols.push(r * N + c);
+    const w1 = build(downCols);
+    ok('two columns confined to two rows is found as a col->row subset',
+      !!w1 && w1.from === 'col' && w1.to === 'row' && w1.k === 2, w1 ? w1.from + '->' + w1.to + ' k=' + w1.k : 'nothing');
+    ok('and it says so in a sentence', !!w1 && /^Columns A and B only have squares in rows 1 and 2/.test(w1.text), w1 ? w1.text : '');
+    // and the mirror of it: rows 1 and 2 have squares left in columns A and B only
+    const downRows = [];
+    for (const r of [0, 1]) for (let c = 2; c < N; c++) downRows.push(r * N + c);
+    const w2 = build(downRows);
+    ok('two rows confined to two columns is found as a row->col subset',
+      !!w2 && w2.from === 'row' && w2.to === 'col' && w2.k === 2, w2 ? w2.from + '->' + w2.to + ' k=' + w2.k : 'nothing');
+    ok('and it says so too', !!w2 && /^Rows 1 and 2 only have squares in columns A and B/.test(w2.text), w2 ? w2.text : '');
+  }
 
   // nothing a witness crosses out may be a square of the answer
   {
@@ -547,98 +609,59 @@ head('10. every step of a hint carries a witness');
     ok('every touching square really would empty the unit it names (' + n2 + ' of them)', bad === null, bad || '');
   }
 
-  // one-step what-if: the crown, the cascade, and the unit that runs out
+  // The complaint that ended the fourth rule: "A crown at F1 forces five more
+  // crowns, and then indigo has nowhere to go." She does not want to be asked
+  // to suppose anything at all, however short the supposition. So no shipped
+  // board's chain may hold a step that supposes one, and every chain has to
+  // reach the last crown on the three rules that do not.
   {
-    let bad = null, n2 = 0;
-    for (let n = 0; n < boards.length && !bad; n++) {
-      const p = boards[n], N = p.N;
-      walk(p, (st, w) => {
-        if (w.rule !== 'whatif') return;
-        n2++;
-        const t = C.cloneState(st);
-        const trace = { steps: [], empty: null };
-        const fine = C.place(t, (w.trigger / N) | 0, w.trigger % N) && C.singlesPass(t, trace) >= 0;
-        if (fine) { bad = all[n] + ': that crown is fine, ' + w.text; return false; }
-        const left = liveIn(t, cellsOfUnit(N, p.regions, w.emptied));
-        // either the unit has nothing left, or its one square is in a column
-        // or a colour already spoken for
-        const stuck = left.length === 0 ||
-          (left.length === 1 && (t.colDone[left[0] % N] || t.regDone[p.regions[left[0]]]));
-        if (!stuck || w.elim.length !== 1 || w.elim[0] !== w.trigger) { bad = all[n] + ' ' + w.text; return false; }
-        // it earns the deeper wording: a plain touching step would have caught
-        // it already, so the cascade is what does the work
-        if (!w.cascade.length) { bad = all[n] + ': a what-if with nothing forced, ' + w.text; return false; }
-      });
-    }
-    ok('every what-if really does empty the unit it names (' + n2 + ' of them)', bad === null, bad || '');
-  }
-
-  // The complaint that started this: "A crown at F1 forces five more crowns,
-  // and then indigo has nowhere to go." Nobody can follow that. Two things
-  // fix it, and both are checked here: the shortest disproof on the board is
-  // the one that gets said, and no board ships that needs a long one anywhere.
-  {
-    let deeper = null, n2 = 0;
-    for (let n = 0; n < boards.length && !deeper; n++) {
-      const p = boards[n], N = p.N;
-      walk(p, (st, w) => {
-        if (w.rule !== 'whatif') return;
-        n2++;
-        let shortest = Infinity;
-        for (let i = 0; i < N * N; i++) {
-          if (!st.cand[i]) continue;
-          const r = (i / N) | 0;
-          if (st.queenCol[r] !== -1) continue;
-          const t = C.cloneState(st);
-          const tr = { steps: [], empty: null };
-          if (C.place(t, r, i % N) && C.singlesPass(t, tr) >= 0) continue;
-          if (tr.steps.length < shortest) shortest = tr.steps.length;
-        }
-        if (w.cascade.length > shortest) {
-          deeper = all[n] + ': chose ' + w.cascade.length + ' forced crowns with ' + shortest + ' available';
-          return false;
-        }
-      });
-    }
-    // a disproof with nothing forced is the touching rule, which is cheaper and
-    // already runs first, so this also pins that touching never loses to a what-if
-    ok('no what-if is chosen while a shallower one is there (' + n2 + ' of them)', deeper === null, deeper || '');
-
-    const hist = {};
-    let over = null;
+    let hypothetical = null, unfinished = null, worded = null;
+    const rules = {};
     for (let n = 0; n < boards.length; n++) {
       const p = boards[n];
-      for (const w of C.chain(p.N, p.regions, p.sol)) {
-        if (w.rule !== 'whatif') continue;
-        hist[w.cascade.length] = (hist[w.cascade.length] || 0) + 1;
-        if (w.cascade.length > C.MAX_CASCADE && !over) over = all[n] + ' needs ' + w.cascade.length + ' forced crowns';
+      const ch = C.chain(p.N, p.regions, p.sol);
+      for (const w of ch) {
+        const key = w.rule === 'subset' ? 'subset k=' + w.k : w.rule;
+        rules[key] = (rules[key] || 0) + 1;
+        if (w.rule === 'whatif' || w.rule === 'flat' || w.rule === 'solution') {
+          hypothetical = hypothetical || (all[n] + ' :: ' + w.rule + ' :: ' + w.text);
+        }
+        // and no wording anywhere may ask her to imagine a crown somewhere
+        if (/\bwould\b|\btry\b|\bsuppose\b|\bif\b/i.test(w.text)) worded = worded || (all[n] + ' :: ' + w.text);
       }
+      if (ch.filter(w => w.place).length !== p.N) unfinished = unfinished || all[n];
     }
-    const shape = Object.keys(hist).sort().map(k => k + ':' + hist[k]).join(' ');
-    ok('no shipped puzzle needs a what-if past ' + C.MAX_CASCADE + ' forced crowns (' + shape + ')', over === null, over || '');
-    ok('and every shipped puzzle can be explained end to end',
+    const shape = Object.keys(rules).sort().map(k => k + ' ' + rules[k]).join(', ');
+    ok('no shipped board asks her to suppose a crown anywhere (' + shape + ')', hypothetical === null, hypothetical || '');
+    ok('and every shipped chain finishes on those rules alone', unfinished === null, unfinished || '');
+    ok('no hint on a shipped board says would, try, suppose or if', worded === null, worded || '');
+    ok('every shipped puzzle can be explained end to end',
       boards.every(p => C.followable(p.N, p.regions, p.sol)));
   }
 
-  // the wording: a cascade is walked, never read out in a lump
+  // the touching rule reads as a statement about where the unit's squares are,
+  // not as a crown put down and taken back
   {
-    let bad = null, walked = 0, plain = 0;
+    let bad = null, n2 = 0;
+    const shapes = {};
     for (let n = 0; n < boards.length && !bad; n++) {
-      const p = boards[n];
-      for (const w of C.chain(p.N, p.regions, p.sol)) {
-        if (w.rule !== 'whatif') continue;
-        if (!w.tryText || !w.endText || !Array.isArray(w.cascadeText) || w.cascadeText.length !== w.cascade.length) {
-          bad = all[n] + ': the what-if is missing the pieces the page walks it with'; break;
-        }
-        if (w.cascadeText.some(s => !s.text || !s.unit || s.cell == null)) { bad = all[n] + ': a cascade line says nothing'; break; }
-        // at most two forced crowns are ever named in one sentence
-        const named = (w.text.match(/\b[A-J](?:[1-9]|10)\b/g) || []).length;
-        if (named > 3) { bad = all[n] + ': ' + w.text; break; }
-        if (w.cascade.length > 1) walked++; else plain++;
-      }
+      const p = boards[n], N = p.N;
+      walk(p, (st, w) => {
+        if (w.rule !== 'touch') return;
+        n2++;
+        shapes[w.emptied.kind] = (shapes[w.emptied.kind] || 0) + 1;
+        if (!/^Every square /.test(w.text)) { bad = all[n] + ' :: ' + w.text; return false; }
+        if (!/ is out\.$|, so they are out\.$/.test(w.text)) { bad = all[n] + ' :: ' + w.text; return false; }
+        // a square is never ruled out of its own unit, so the reason named is
+        // never the kind of unit the step is about
+        const noun = w.emptied.kind === 'row' ? 'row' : w.emptied.kind === 'col' ? 'column' : 'colour';
+        const said = w.text.slice(w.text.indexOf("'s ") >= 0 ? w.text.indexOf("'s ") : w.text.indexOf(' the '));
+        if (said.indexOf(noun + ',') >= 0 || said.indexOf(noun + ' or') >= 0) { bad = all[n] + ' :: ' + w.text; return false; }
+      });
     }
-    ok('a what-if never names more than two forced crowns in one sentence', bad === null, bad || '');
-    ok('cascades of two are walked a crown at a time (' + walked + '), shorter ones are one sentence (' + plain + ')', walked + plain > 0);
+    ok('every touching step is a flat statement about the board (' + n2 + ' of them)', bad === null, bad || '');
+    ok('and all three kinds of unit are said the same way (' + JSON.stringify(shapes) + ')',
+      ['row', 'col', 'reg'].every(k => shapes[k] > 0));
   }
 
   // the rater is untouched: its passes still say the same thing about every
@@ -763,6 +786,47 @@ head('11. the staged hint on the player\'s own board');
     ok('a hint working from her crosses never crosses out an answer square', bad === null, bad || '');
   }
 
+  // The hint's last resort, on a board the three rules cannot finish. Nothing
+  // that ships is one of those, but a board saved on the device before the
+  // rater changed could be, and random mode makes its own boards. It says the
+  // conclusion flat and offers the cross, and it never says how it got there,
+  // because how it got there is a crown put down on paper and followed.
+  {
+    const r6 = C.makeRng(2468);
+    let refused = 0, flat = 0, quiet = 0, offered = 0, finished = 0;
+    for (let k = 0; k < 3000 && refused < 4; k++) {
+      const N = 7 + (k % 4);
+      const sol = C.randomPlacement(N, r6);
+      if (!sol) continue;
+      const reg = C.growRegions(N, sol, r6);
+      if (!reg || C.minSize(N, reg) < 2) continue;
+      if (C.tighten(N, reg, sol, r6, 600, 2) < 0) continue;
+      if (C.countSolutions(N, reg, 2) !== 1) continue;
+      if (C.rate(N, reg).solved) continue;
+      refused++;
+      // play it right through on staged hints, the way she would
+      const crowns = [], crossed = new Set();
+      let steps = 0, sawFlat = false, stuck = false;
+      while (crowns.length < N && steps++ < 400) {
+        const w = C.explain(N, reg, sol, crowns, crossed);
+        if (!w || w.rule === 'wrong' || w.rule === 'wrongcross') { stuck = true; break; }
+        if (w.rule === 'flat') {
+          sawFlat = true;
+          if (/^[A-J](?:[1-9]|10) is out\.$/.test(w.text)) quiet++;
+          if (w.elim.length === 1 && C.sayCrosses(N, w.elim) === 'That crosses out ' + C.cellName(N, w.elim[0]) + '.') offered++;
+        }
+        if (w.place) crowns.push(w.place.r * N + w.place.c);
+        else { if (w.elim.every(i => crossed.has(i))) { stuck = true; break; } for (const i of w.elim) crossed.add(i); }
+      }
+      if (sawFlat) flat++;
+      if (!stuck && crowns.length === N) finished++;
+    }
+    ok('a board the three rules cannot finish falls back on the flat step (' + refused + ' boards)', flat === refused, flat + '/' + refused);
+    ok('the fallback says the conclusion and nothing else', quiet >= refused, quiet + ' flat steps, all bare');
+    ok('and still offers the cross that goes with it', offered === quiet, offered + '/' + quiet);
+    ok('a board can be finished on the fallback too', finished === refused, finished + '/' + refused);
+  }
+
   // the sentence that names the crosses is rebuilt from the ones she can see
   {
     const N = 7;
@@ -794,36 +858,35 @@ head('12. the page paints what the witness says');
   ok('the worked solution is offered when the board is solved', /id="replayBtn"/.test(page));
   ok('the replay draws on a board of its own', /const view = replay \? replay\.marks : marks;/.test(page));
   ok('the page is English only, with no toggle left in it', !/langBtn|data-lang|toggleLang/.test(page));
-  // the staged walk: a cascade is one crown a tap, and the crowns it supposes
-  // are ghosts, never marks on the board
-  ok('a supposed crown is drawn back, and ringed so it is never a placed one', /\.cell\.trycrown \.hint \{ opacity: \.55; \}/.test(page) && /\.cell\.trycrown \.wash \{/.test(page) && /outline: 2px dashed/.test(page));
-  ok('and never lands on a square that already holds one',
-    /\.cell\.trycrown\[data-mark="2"\] \.hint svg \{ display: none; \}/.test(page)
-    && /classList\.toggle\('trycrown', !!fx && !!fx\.crown && fx\.crown\.has\(i\) && view\[i\] !== 2\)/.test(page));
+  // The staged what-if walk is gone, and so is every piece of the page that
+  // drew it: no supposed crowns, no dashed rings, no extra taps.
+  ok('no square can be drawn holding a crown the hint only supposed', !/trycrown/.test(page));
+  ok('the page has nothing left that walks a what-if',
+    !/isWalked|cascadeText|tryText|endText|whatif/.test(page));
   const stages = page.slice(page.indexOf('function stagesOf'), page.indexOf('function clearHint'));
-  ok('a cascade gets a tap for the try, one per crown it forces, and one for the end',
-    /for \(const s of w\.cascadeText\)/.test(stages) && /w\.tryText/.test(stages) && /w\.endText/.test(stages));
-  ok('every other rule keeps its two taps', /if \(!isWalked\(w\)\) \{/.test(stages));
-  ok('the replay walks a cascade the same way', /const use = isWalked\(w\) \? stages : stages\.slice\(-1\);/.test(page));
+  ok('every rule gets the same two taps, the sentence and the crosses it offers',
+    (stages.match(/text: w\.text/g) || []).length === 2 && /offer: true/.test(stages) && !/for \(/.test(stages));
+  ok('the replay takes the last stage of every step, one tap each',
+    /const stage = stagesOf\(w\)\.slice\(-1\)\[0\];/.test(page));
   ok('a cross where the crown belongs is called out', /w\.rule === 'wrongcross'/.test(page) && /whyWrongCross/.test(page));
-  ok('the campaign progress key was bumped with the new levels', /progress3: progress/.test(page) && !/progress2/.test(page));
+  ok('the campaign progress key was bumped with the new levels',
+    /progress4: progress/.test(page) && /levelBests4: levelBests/.test(page) && !/progress3/.test(page));
 
   // the witness fields the page paints with have to be there on every step
   const levels = require(path.join(__dirname, '..', 'levels.js'));
-  let missing = null, rings = { touch: 0, whatif: 0 }, quiet = 0;
+  let missing = null, rings = { touch: 0 }, quiet = 0;
   for (const str of levels.campaign) {
     const p = C.decode(str);
     for (const w of C.chain(p.N, p.regions, p.sol)) {
       if (!Array.isArray(w.units) || !Array.isArray(w.cells) || !Array.isArray(w.ring) || !Array.isArray(w.elim)) { missing = w.rule; break; }
       if (!w.ring.every(i => w.cells.indexOf(i) >= 0)) { missing = w.rule + ': ring is not part of the case'; break; }
-      if (w.rule === 'touch' || w.rule === 'whatif') { if (w.ring.length) rings[w.rule]++; }
+      if (w.rule === 'touch') { if (w.ring.length) rings[w.rule]++; }
       else if (!w.ring.length) quiet++;
     }
     if (missing) break;
   }
   ok('every witness carries the units, cells, ring and crosses the page paints', missing === null, missing || '');
-  ok('the two rules that turn on named squares ring them (' + rings.touch + ' touching, ' + rings.whatif + ' what-if)',
-    rings.touch > 0 && rings.whatif > 0);
+  ok('the touching rule rings the squares that make its case (' + rings.touch + ' steps)', rings.touch > 0);
   ok('the subset rules leave the ring to the wash (' + quiet + ' steps)', quiet > 0);
 }
 

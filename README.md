@@ -19,9 +19,12 @@ column and every colour region. Crowns may never touch, not even at a corner.
   word comes from the solver working on the crowns and crosses already on the
   board, so a cross you have made is a fact it reasons from, and a cross where
   a crown belongs is called out the way a wrong crown is.
-- A step that says "suppose a crown went here" is walked one crown at a tap,
-  each in a dashed ghost ring with the one reason it was forced, and no puzzle
-  ships that needs more than two forced crowns to see the contradiction.
+- **Every hint is a statement about the board as it stands.** None of them
+  asks you to put a crown down in your head and see what it forces. There are
+  three rules and each is one sentence: a row, column or colour with one square
+  left; k units of one kind whose squares all sit inside k units of another;
+  and a square that every square some unit has left already rules out. No
+  puzzle ships that cannot be finished on those three alone.
 - Solve a board and "Show me the reasoning" replays the whole chain, a step a tap.
 - English only. Light and dark.
 - No ads, no timers counting down, no lives. The clock only counts up.
@@ -45,9 +48,13 @@ technique-based rater and the generator. The page cannot `require` it, so
 `core.js` at the root is a copy that `tools/mirror.js` refreshes and
 `tools/test.js` refuses to let drift. Edit the one under `tools/`.
 
-A puzzle's difficulty is the reasoning it actually asks for. The colour sizes
-are a separate requirement of each band, and a board that fails them is thrown
-away rather than shipped under an easier label.
+A puzzle's difficulty is the reasoning it actually asks for, over the same
+three rules the hint says out loud. Easy is singles and one-unit confinement
+and nothing else. Medium needs the touching rule or a two-unit subset. Hard
+needs a subset of three or four units, or enough of the middling steps in one
+chain to cross the effort score. The colour sizes are a separate requirement of
+each band, and a board that fails them is thrown away rather than shipped under
+an easier label.
 
 `tools/build.js` is seeded, so rebuilding produces the same 318 puzzles.
 Each one is re-decoded from its codec string and re-proved to have a single

@@ -75,10 +75,14 @@ const check = p => {
   if (!r.solved) throw new Error('needs guessing: ' + s);
   if (r.band !== d.band) throw new Error('band drifted: ' + s);
   if (r.techBand !== d.band) throw new Error('labelled below its technique band: ' + s);
-  // and it has to be followable, not just solvable: every what-if in the worked
-  // explanation is a crown and at most two forced out of it, because past that
-  // nobody can hold the chain in their head
-  if (!C.followable(d.N, d.regions, d.sol)) throw new Error('needs a what-if nobody could follow: ' + s);
+  // and it has to be followable, not just solvable: every step of the worked
+  // explanation is a single, a subset or a touching step, each of them one
+  // sentence about the board as it stands, and the chain reaches the last crown
+  if (!C.followable(d.N, d.regions, d.sol)) throw new Error('needs a step the hint cannot say: ' + s);
+  for (const w of C.chain(d.N, d.regions, d.sol)) {
+    if (w.rule === 'flat' || w.rule === 'solution') throw new Error('a step with no reason to give: ' + s);
+    if (/\bwould\b|\btry\b|\bsuppose\b/i.test(w.text)) throw new Error('a step that supposes: ' + w.text);
+  }
   // the size profile is part of the band, so it gets checked here too
   const prof = C.SIZE_PROFILE[d.band];
   const min = C.minSize(d.N, d.regions);
@@ -132,14 +136,20 @@ console.log('  spare pool ' + Object.values(poolStrings).flat(2).length + ' puzz
 
 // ------------------------------------------------------------- what shipped
 const all = campaign.concat(Object.values(pool).flat(2));
-// how deep the what-ifs actually go, over everything that shipped
+// which rules the shipped boards actually ask for
 {
-  const hist = {};
+  const hist = {}, byBand = [{}, {}, {}];
+  let steps = 0;
   for (const p of all) for (const w of C.chain(p.N, p.regions, p.sol)) {
-    if (w.rule === 'whatif') hist[w.cascade.length] = (hist[w.cascade.length] || 0) + 1;
+    const key = w.rule === 'subset' ? 'subset k=' + w.k : w.rule;
+    hist[key] = (hist[key] || 0) + 1;
+    byBand[p.band][key] = (byBand[p.band][key] || 0) + 1;
+    steps++;
   }
-  console.log('\n  what-if cascade lengths over every shipped board');
-  console.log('  ' + (Object.keys(hist).sort().map(k => k + ' forced crowns: ' + hist[k]).join(', ') || 'none'));
+  const say = h => Object.keys(h).sort().map(k => k + ' ' + h[k]).join(', ');
+  console.log('\n  rules over every shipped board (' + steps + ' steps)');
+  console.log('    all      ' + say(hist));
+  for (const band of [0, 1, 2]) console.log('    ' + BAND_NAME[band].padEnd(8) + say(byBand[band]));
 }
 
 console.log('\n  band    n  has 1-cell  has <=2-cell  avg min size  avg size CV');

@@ -199,17 +199,6 @@
   }
   /* the crosses a hint is offering, not yet made */
   .cell.ghost .x { opacity: .42; }
-  /* A crown the hint is only supposing, while it walks a what-if. It is the
-     same white-on-near-black glyph as the hint marker, so it reads on all ten
-     colours in both themes, but drawn back and sitting inside a dashed ring:
-     a crown she has actually placed is solid and has no ring, so the two can
-     never be taken for each other on a board that holds both. */
-  .cell.trycrown .hint { opacity: .55; }
-  .cell.trycrown .wash {
-    outline: 2px dashed #ffffff; outline-offset: calc(-1 * var(--thick) - 2px);
-    filter: drop-shadow(0 0 1.5px rgba(16,19,25,.9));
-  }
-  .cell.trycrown[data-mark="2"] .hint svg { display: none; }
 
   /* ---------------------------------------------------------- panel */
   .panel { width: var(--board); display: grid; gap: 14px; align-content: start; }
@@ -597,13 +586,13 @@
       code: P ? C.encode(P) : null,
       marks: marks ? Array.from(marks).join('') : null,
       owners, mistakes, elapsed, solved, autoX, showTimer, bests,
-      // The campaign was regenerated again when every board that needed a
-      // what-if nobody could follow was thrown out and the bands stopped being
-      // capped below the work they ask for. Level 12 is not the board it was,
-      // so per-level progress and records move to fresh keys rather than
-      // crediting boards nobody played; per-size records and the preferences
-      // keep their old ones.
-      progress3: progress, levelBests3: levelBests,
+      // The campaign was regenerated again when the rater stopped using the
+      // rule the hint could not say out loud, so every board now finishes on
+      // singles, subsets and touching alone and the bands are drawn on that
+      // family. Level 12 is not the board it was, so per-level progress and
+      // records move to fresh keys rather than crediting boards nobody played;
+      // per-size records and the preferences keep their old ones.
+      progress4: progress, levelBests4: levelBests,
     };
     // The undo stack is stored with the board, so closing the tab mid-puzzle does
     // not cost her the moves she might want back. Only the last 40 moves go to
@@ -881,7 +870,6 @@
       el.classList.toggle('lit', !!fx && fx.lit.has(i));
       el.classList.toggle('focus', !!fx && fx.focus.has(i));
       el.classList.toggle('ghost', !!fx && fx.ghost.has(i) && view[i] === 0);
-      el.classList.toggle('trycrown', !!fx && !!fx.crown && fx.crown.has(i) && view[i] !== 2);
     }
   }
   function paintPanel() {
@@ -1023,37 +1011,27 @@
   };
   const unitKeyOf = u => (u.kind === 'row' ? 'r' : u.kind === 'col' ? 'c' : 'g') + u.k;
   function hintFxOf(w, ghosts) {
-    const lit = new Set(), focus = new Set(), ghost = new Set(), crown = new Set();
+    const lit = new Set(), focus = new Set(), ghost = new Set();
     for (const u of w.units || []) for (const i of unitCells(unitKeyOf(u))) lit.add(i);
     // only the rules that turn on two or three named squares ring anything;
     // everywhere else the wash over the units has already said it
     for (const i of w.ring || []) focus.add(i);
-    // the crowns a what-if is supposing, drawn as ghosts while it is walked
-    for (const i of w.crown || []) crown.add(i);
     for (const i of ghosts || []) ghost.add(i);
-    return { lit: lit, focus: focus, ghost: ghost, crown: crown };
+    return { lit: lit, focus: focus, ghost: ghost };
   }
 
-  // A what-if that forces more than one crown is walked one crown a tap: the
-  // try, then each crown it forces with the reason it was forced, then the unit
-  // that runs out. Nobody can follow five crowns from one sentence, so no tap
-  // ever adds more than one of them. Every other rule keeps the two taps it
-  // always had: the rule, then the crosses it offers.
-  const isWalked = w => w.rule === 'whatif' && !!w.cascadeText && w.cascadeText.length > 1;
+  // Two taps, the same two for every rule: the sentence with its wash and
+  // rings, then the crosses that follow, named and drawn faintly where they
+  // would go. There used to be a third kind of step that took more taps than
+  // that, a crown supposed at some square and the crowns it forced walked out
+  // one at a time in dashed rings. It is gone, along with the rule behind it:
+  // a hint is a statement about the board as it stands, never a crown put
+  // down to see what happens. A crown that can be proved outright still shows
+  // at once, with no stages at all.
   function stagesOf(w) {
     const units = w.units || [], ring = w.ring || [];
-    if (!isWalked(w)) {
-      return [{ text: w.text, units: units, ring: ring, crown: [] },
-              { text: w.text, units: units, ring: ring, crown: [], offer: true }];
-    }
-    const crowns = [w.trigger];
-    const out = [{ text: w.tryText, units: [], ring: [w.trigger], crown: crowns.slice() }];
-    for (const s of w.cascadeText) {
-      crowns.push(s.cell);
-      out.push({ text: s.text, units: [s.unit], ring: [w.trigger], crown: crowns.slice() });
-    }
-    out.push({ text: w.endText, units: units, ring: [w.trigger], crown: crowns.slice(), offer: true });
-    return out;
+    return [{ text: w.text, units: units, ring: ring },
+            { text: w.text, units: units, ring: ring, offer: true }];
   }
   function clearHint(keepLine) {
     hintCell = -1; hintKind = ''; hintStep = null; hintStage = 0; hintFx = null; hintStages = null;
@@ -1147,8 +1125,6 @@
     const w = f.step, stage = f.stage;
     replay.marks = replayMarks(f.step_i);
     hintCell = -1; hintKind = '';
-    // only the last tap of a step shows what it crosses out; the taps before it
-    // are the what-if being walked, and the board it supposes is not hers yet
     if (w.place) { hintCell = w.place.r * P.N + w.place.c; hintKind = 'place'; hintFx = hintFxOf(stage, null); }
     else hintFx = hintFxOf(stage, stage.offer ? w.elim : null);
     $('replayText').textContent = stage.text + (stage.offer && w.crossText ? ' ' + w.crossText : '');
@@ -1161,14 +1137,12 @@
     const steps = C.chain(P.N, P.regions, P.sol);
     if (!steps || !steps.length) return;
     clearHint();
-    // the replay walks a cascade the same way the hint does, one crown a tap.
-    // Every other step is one tap, because the replay makes the crosses itself
-    // and has no offer to hold back for.
+    // One tap a step, all the way through: the replay makes the crosses itself
+    // and has no offer to hold back for, so it takes the last stage of each.
     const frames = [];
     steps.forEach((w, k) => {
-      const stages = stagesOf(w);
-      const use = isWalked(w) ? stages : stages.slice(-1);
-      for (const stage of use) frames.push({ step: w, step_i: k, stage: stage });
+      const stage = stagesOf(w).slice(-1)[0];
+      frames.push({ step: w, step_i: k, stage: stage });
     });
     replay = { steps: steps, frames: frames, at: 0, marks: new Uint8Array(P.N * P.N) };
     $('replayBar').hidden = false;
@@ -1364,9 +1338,9 @@
     randCode = saved.randCode || null;
     autoX = saved.autoX !== false;
     showTimer = saved.showTimer !== false;
-    progress = saved.progress3 || {};
+    progress = saved.progress4 || {};
     bests = saved.bests || {};
-    levelBests = saved.levelBests3 || {};
+    levelBests = saved.levelBests4 || {};
   }
   setMode(mode);
   applyTimerVisibility();
