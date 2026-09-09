@@ -1178,10 +1178,10 @@
     $('hintLine').textContent = '';
     // generate on the spot when it is quick, fall back to the shipped pool
     let p = null;
-    // Made fresh when that is quick, which is every size at Easy and Medium and
-    // the small boards at Hard. A 10x10 Hard has to be both even and twisty and
-    // takes over a second to find, so the budget stops short of that and the
-    // shipped pool answers instantly instead of freezing the board mid-tap.
+    // Made fresh when that is quick, which since the rater dropped its slowest
+    // rule is nearly always: a 10x10 Hard, the worst case, lands inside the
+    // budget about four times in five. When it does not, the shipped pool
+    // answers instantly instead of freezing the board mid-tap.
     try { p = C.generate(randSize, { band: randBand, budgetMs: 500, strict: true }); } catch (e) {}
     let code;
     if (p) code = C.encode(p);
