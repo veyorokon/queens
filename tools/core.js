@@ -741,9 +741,12 @@
   const unitsPhrase = (kind, ks) => kind === 'reg' ? coloursPhrase(ks) : linesPhrase(kind, ks);
   // the one sentence that names the crosses. The page rebuilds it from the
   // squares she has not already crossed herself, so it lives on its own.
+  // Four names is as many as fits on one line beside the sentence that earned
+  // them, and the rest are drawn faintly on the board anyway, so a longer list
+  // is counted rather than read out.
   function sayCrosses(N, cells) {
     if (!cells || !cells.length) return '';
-    return 'That crosses out ' + namesOf(N, cells, 6) + '.';
+    return 'That crosses out ' + namesOf(N, cells, 4) + '.';
   }
 
   // 1. a row, a column or a colour with one square left
@@ -916,52 +919,56 @@
   function describe(st, w) {
     const N = st.N;
     if (w.rule === 'single') {
+      // "Orange has only one square left: D6."
       const u = w.units[0];
-      w.text = cap1(unitName(u.kind, u.k)) + ' has only one square left, so its crown goes on '
+      w.text = cap1(unitName(u.kind, u.k)) + ' has only one square left: '
         + cellName(N, w.place.r * N + w.place.c) + '.';
     } else if (w.rule === 'solution') {
       w.text = cellName(N, w.place.r * N + w.place.c) + " is this row's square.";
     } else if (w.rule === 'subset') {
       const S = w.fromUnits.map(u => u.k), T = w.toUnits.map(u => u.k);
-      if (w.k === 1 && w.from === 'reg') {
-        // "Grey's last squares are all in row 8."
+      if (w.k >= 3) {
+        // Three or four colours read out by name is a sentence she has to hold
+        // in her head rather than check against the board. So a wide set names
+        // the lines, which she can find at a glance, and counts the rest. The
+        // side that goes unnamed is washed instead, which is why it joins the
+        // units the page lights up.
+        if (w.to === 'reg') {
+          // "Rows 1 to 4 have only four colours left."
+          w.text = cap1(unitsPhrase(w.from, S)) + ' have only ' + countWord(w.k) + ' colours left.';
+        } else {
+          // "Columns H to J are spoken for by three colours."
+          w.text = cap1(unitsPhrase(w.to, T)) + ' are spoken for by ' + countWord(w.k) + ' ' + pluralOf(w.from) + '.';
+          w.units = w.toUnits.concat(w.fromUnits);
+        }
+      } else if (w.k === 1 && w.from === 'reg') {
+        // "Sand's last squares are all in column E."
         w.text = cap1(COLOUR_NAMES[S[0]]) + "'s last squares are all in " + lineName(w.to, T[0]) + '.';
-      } else if (w.k === 1 && w.to === 'reg') {
-        // "Every square left in row 6 is orange, so orange's crown is in row 6."
-        const g = COLOUR_NAMES[T[0]];
-        w.text = 'Every square left in ' + lineName(w.from, S[0]) + ' is ' + g + ', so ' + g
-          + "'s crown is in that " + nounOf(w.from) + '.';
       } else if (w.to === 'reg') {
-        // "Rows 3 and 4 have nothing left but pink and green."
-        w.text = cap1(unitsPhrase(w.from, S)) + ' have nothing left but ' + coloursPhrase(T)
-          + ', so those ' + countWord(w.k) + ' colours belong there.';
+        // "Row 6 has only orange left."
+        // "Rows 3 and 4 have only pink and green left."
+        w.text = cap1(unitsPhrase(w.from, S)) + (w.k === 1 ? ' has' : ' have')
+          + ' only ' + coloursPhrase(T) + ' left.';
       } else {
-        // "Purple, red and blue all live in columns F to H."
-        const verb = w.from === 'reg' ? (w.k === 2 ? ' both live in ' : ' all live in ')
-          : (w.k === 1 ? ' only has squares in ' : ' only have squares in ');
-        w.text = cap1(unitsPhrase(w.from, S)) + verb + unitsPhrase(w.to, T)
-          + ', so those ' + pluralOf(w.to) + ' are theirs.';
+        // "Purple and indigo both live in columns F and G."
+        // "Columns A and B only have squares in rows 1 and 2."
+        const verb = w.from === 'reg' ? ' both live in '
+          : (w.k === 1 ? ' has nothing left outside ' : ' only have squares in ');
+        w.text = cap1(unitsPhrase(w.from, S)) + verb + unitsPhrase(w.to, T) + '.';
       }
     } else if (w.rule === 'touch') {
       // Said as a fact about the board as it stands, never as a supposition.
       // "A crown at F4 would leave pink with nowhere to go" asked her to put a
-      // crown down in her head and look at what happened; this says the same
-      // thing by naming where pink's squares are. The two reasons named are the
-      // ones that can bite: a square is never ruled out of its own unit, so a
-      // colour's step never has to say "colour" and a row's never has to say
-      // "row".
-      const gone = unitName(w.emptied.kind, w.emptied.k), n = w.elim.length;
-      const kind = w.emptied.kind;
-      const a = kind === 'row' ? 'column' : 'row';
-      const b = kind === 'reg' ? 'column' : 'colour';
-      const head = 'Every square ' + gone + ' has left is in ';
-      if (n === 1) {
-        const at = cellName(N, w.elim[0]);
-        w.text = head + at + "'s " + a + ', ' + b + ' or next to it, so ' + at + ' is out.';
-      } else {
-        const who = n <= 3 ? namesOf(N, w.elim, 3) : countWord(n) + ' other squares';
-        w.text = head + 'the ' + a + ' or ' + b + ' of ' + who + ', or next to them, so they are out.';
-      }
+      // crown down in her head and look at what happened. This says the same
+      // thing as something she can check by running her eye along pink's last
+      // squares: every one of them kills F4, so no crown stands there. "Rules
+      // out" is the word the board already uses for what a crown does to the
+      // squares around it.
+      const gone = cap1(unitName(w.emptied.kind, w.emptied.k)), n = w.elim.length;
+      // two squares still fit on the line; past that the line counts them and
+      // the sentence after it names them
+      const who = n <= 2 ? namesOf(N, w.elim, 2) : countWord(n) + ' squares';
+      w.text = gone + "'s last squares all rule out " + who + '.';
     } else if (w.rule === 'flat') {
       w.text = cellName(N, w.elim[0]) + ' is out.';
     }

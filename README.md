@@ -13,19 +13,21 @@ column and every colour region. Crowns may never touch, not even at a corner.
   back when the crown comes off.
 - A crown that breaks a rule turns red straight away, along with the crown it
   clashes with. Mistakes are counted and never go down, even after Undo.
-- Hint explains the deduction in stages: the rule in a sentence, with the rows,
-  columns and colours it turns on washed over, then the crosses that follow,
-  drawn faintly until you take them, then the crown at the end of it. Every
-  word comes from the solver working on the crowns and crosses already on the
-  board, so a cross you have made is a fact it reasons from, and a cross where
-  a crown belongs is called out the way a wrong crown is.
+- **Hint takes two taps and never three.** The first says the rule in one
+  short sentence, washes the rows, columns and colours it turns on, and draws
+  the crosses that follow faintly where they go. The second puts them on the
+  board, and hands you the crown if one follows straight away. A crown that can
+  be proved outright arrives on the first tap. Every word comes from the solver
+  working on the crowns and crosses already on the board, so a cross you have
+  made is a fact it reasons from, and a cross where a crown belongs is called
+  out the way a wrong crown is.
 - **Every hint is a statement about the board as it stands.** None of them
   asks you to put a crown down in your head and see what it forces. There are
-  three rules and each is one sentence: a row, column or colour with one square
-  left; k units of one kind whose squares all sit inside k units of another;
-  and a square that every square some unit has left already rules out. No
-  puzzle ships that cannot be finished on those three alone.
-- Solve a board and "Show me the reasoning" replays the whole chain, a step a tap.
+  three rules and each is one short line she can check by looking: a row,
+  column or colour with one square left; k units of one kind whose squares all
+  sit inside k units of another; and a square that every square some unit has
+  left already rules out. No puzzle ships that cannot be finished on those
+  three alone.
 - English only. Light and dark.
 - No ads, no timers counting down, no lives. The clock only counts up.
 - The game in progress, the campaign record and the best time per board size

@@ -81,7 +81,7 @@ const check = p => {
   if (!C.followable(d.N, d.regions, d.sol)) throw new Error('needs a step the hint cannot say: ' + s);
   for (const w of C.chain(d.N, d.regions, d.sol)) {
     if (w.rule === 'flat' || w.rule === 'solution') throw new Error('a step with no reason to give: ' + s);
-    if (/\bwould\b|\btry\b|\bsuppose\b/i.test(w.text)) throw new Error('a step that supposes: ' + w.text);
+    if (/\bwould\b|\btry\b|\btries\b|\bsuppose\b|\bimagine\b|\bif\b/i.test(w.text)) throw new Error('a step that supposes: ' + w.text);
   }
   // the size profile is part of the band, so it gets checked here too
   const prof = C.SIZE_PROFILE[d.band];

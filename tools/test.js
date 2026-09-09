@@ -4,6 +4,12 @@ const C = require('./core.js');
 const fs = require('fs');
 const path = require('path');
 
+// The words a hint must never use. Every one of them asks her to put a crown
+// down in her head and look at what happens, which is the whole thing the
+// player turned down.
+const HYPOTHETICAL = /\bwould\b|\btry\b|\btries\b|\bsuppose\b|\bimagine\b|\bif\b/i;
+const cap1 = x => x.charAt(0).toUpperCase() + x.slice(1);
+
 let pass = 0, fail = 0;
 const ok = (name, cond, extra) => {
   if (cond) { pass++; console.log('  ok   ' + name); }
@@ -627,20 +633,20 @@ head('10. every step of a hint carries a witness');
           hypothetical = hypothetical || (all[n] + ' :: ' + w.rule + ' :: ' + w.text);
         }
         // and no wording anywhere may ask her to imagine a crown somewhere
-        if (/\bwould\b|\btry\b|\bsuppose\b|\bif\b/i.test(w.text)) worded = worded || (all[n] + ' :: ' + w.text);
+        if (HYPOTHETICAL.test(w.text)) worded = worded || (all[n] + ' :: ' + w.text);
       }
       if (ch.filter(w => w.place).length !== p.N) unfinished = unfinished || all[n];
     }
     const shape = Object.keys(rules).sort().map(k => k + ' ' + rules[k]).join(', ');
     ok('no shipped board asks her to suppose a crown anywhere (' + shape + ')', hypothetical === null, hypothetical || '');
     ok('and every shipped chain finishes on those rules alone', unfinished === null, unfinished || '');
-    ok('no hint on a shipped board says would, try, suppose or if', worded === null, worded || '');
+    ok('no step in a shipped chain says would, try, suppose, imagine or if', worded === null, worded || '');
     ok('every shipped puzzle can be explained end to end',
       boards.every(p => C.followable(p.N, p.regions, p.sol)));
   }
 
-  // the touching rule reads as a statement about where the unit's squares are,
-  // not as a crown put down and taken back
+  // the touching rule reads as a statement about the board, and it names the
+  // unit whose last squares do the ruling out, so she can check it by looking
   {
     let bad = null, n2 = 0;
     const shapes = {};
@@ -650,16 +656,20 @@ head('10. every step of a hint carries a witness');
         if (w.rule !== 'touch') return;
         n2++;
         shapes[w.emptied.kind] = (shapes[w.emptied.kind] || 0) + 1;
-        if (!/^Every square /.test(w.text)) { bad = all[n] + ' :: ' + w.text; return false; }
-        if (!/ is out\.$|, so they are out\.$/.test(w.text)) { bad = all[n] + ' :: ' + w.text; return false; }
-        // a square is never ruled out of its own unit, so the reason named is
-        // never the kind of unit the step is about
-        const noun = w.emptied.kind === 'row' ? 'row' : w.emptied.kind === 'col' ? 'column' : 'colour';
-        const said = w.text.slice(w.text.indexOf("'s ") >= 0 ? w.text.indexOf("'s ") : w.text.indexOf(' the '));
-        if (said.indexOf(noun + ',') >= 0 || said.indexOf(noun + ' or') >= 0) { bad = all[n] + ' :: ' + w.text; return false; }
+        const head = cap1(C.unitName(w.emptied.kind, w.emptied.k)) + "'s last squares all rule out ";
+        if (w.text.indexOf(head) !== 0) { bad = all[n] + ' :: ' + w.text; return false; }
+        const tail = w.text.slice(head.length);
+        // one or two squares are named; past that the line counts them and the
+        // sentence after it names them
+        const want = w.elim.length <= 2
+          ? w.elim.slice().sort((x, y) => x - y).map(i => C.cellName(N, i)).join(' and ') + '.'
+          : null;
+        if (want ? tail !== want : !/^(three|four|five|six|seven|eight|nine|ten|\d+) squares\.$/.test(tail)) {
+          bad = all[n] + ' :: ' + w.text; return false;
+        }
       });
     }
-    ok('every touching step is a flat statement about the board (' + n2 + ' of them)', bad === null, bad || '');
+    ok('every touching step names the unit and the squares it rules out (' + n2 + ' of them)', bad === null, bad || '');
     ok('and all three kinds of unit are said the same way (' + JSON.stringify(shapes) + ')',
       ['row', 'col', 'reg'].every(k => shapes[k] > 0));
   }
@@ -827,12 +837,54 @@ head('11. the staged hint on the player\'s own board');
     ok('a board can be finished on the fallback too', finished === refused, finished + '/' + refused);
   }
 
+  // Every sentence a hint can put on the line, over every board that ships:
+  // each one played right through on hints alone, taking the crosses each step
+  // offers and the crown that lands with them, plus the four lines the page
+  // says for itself. Not one of them may ask her to suppose anything, so this
+  // is the check that greps the lot.
+  {
+    const t0 = Date.now();
+    // every board that ships, not just the campaign slice this section uses
+    const shipped = levels.campaign.concat(...Object.values(levels.pool).map(b => [].concat.apply([], b)));
+    const all = shipped, boards = shipped.map(C.decode);
+    const said = new Set();
+    let stuck = null, finished = 0;
+    for (let n = 0; n < boards.length; n++) {
+      const p = boards[n], N = p.N;
+      const crowns = [], crossed = new Set();
+      let steps = 0;
+      while (crowns.length < N && steps++ < 400) {
+        const w = C.explain(N, p.regions, p.sol, crowns, crossed);
+        if (!w || w.rule === 'wrong' || w.rule === 'wrongcross') { stuck = stuck || all[n]; break; }
+        said.add(w.text);
+        if (w.crossText) said.add(w.crossText);
+        // the crown that comes with the crosses is a sentence too
+        if (w.then) { said.add(w.then.text); if (w.then.crossText) said.add(w.then.crossText); }
+        if (w.place) { crowns.push(w.place.r * N + w.place.c); continue; }
+        if (w.elim.every(i => crossed.has(i))) { stuck = stuck || all[n]; break; }
+        for (const i of w.elim) crossed.add(i);
+      }
+      if (crowns.length === N) finished++;
+    }
+    // and the lines the page says on its own, which land on the same line
+    const src = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    for (const key of ['hintApply', 'hintCrossed', 'whyWrong', 'whyWrongCross', 'whyDone']) {
+      const m = src.match(new RegExp('\\b' + key + ": '([^']*)'"));
+      if (m) said.add(m[1]); else stuck = stuck || ('the page has no ' + key + ' string');
+    }
+    const guilty = Array.from(said).filter(x => HYPOTHETICAL.test(x));
+    ok('every shipped board plays out on hints alone (' + finished + '/' + boards.length + ', ' +
+      ((Date.now() - t0) / 1000).toFixed(1) + 's)', stuck === null && finished === boards.length, stuck || '');
+    ok('not one of the ' + said.size + ' sentences a hint can say uses would, try, suppose, imagine or if',
+      guilty.length === 0, guilty.slice(0, 3).join('  |  '));
+  }
+
   // the sentence that names the crosses is rebuilt from the ones she can see
   {
     const N = 7;
     ok('the cross sentence names one square', C.sayCrosses(N, [8]) === 'That crosses out B2.', C.sayCrosses(N, [8]));
     ok('the cross sentence joins two with "and"', C.sayCrosses(N, [8, 9]) === 'That crosses out B2 and C2.', C.sayCrosses(N, [8, 9]));
-    ok('a long list of crosses is cut short', /and 2 more\.$/.test(C.sayCrosses(N, [0, 1, 2, 3, 4, 5, 6, 7])), C.sayCrosses(N, [0, 1, 2, 3, 4, 5, 6, 7]));
+    ok('a long list of crosses is cut short at four names', /^That crosses out A1, B1, C1, D1 and 4 more\.$/.test(C.sayCrosses(N, [0, 1, 2, 3, 4, 5, 6, 7])), C.sayCrosses(N, [0, 1, 2, 3, 4, 5, 6, 7]));
     ok('no crosses, no sentence', C.sayCrosses(N, []) === '');
   }
 }
@@ -847,7 +899,7 @@ head('12. the page paints what the witness says');
   ok('the squares that make the case are ringed', /\.cell\.focus \.wash \{/.test(page));
   ok('the crosses on offer are drawn faintly', /\.cell\.ghost \.x \{ opacity: \.42; \}/.test(page));
   // a ghost X must never sit on a square that already carries a mark
-  ok('a ghost cross only goes on an empty square', /classList\.toggle\('ghost', !!fx && fx\.ghost\.has\(i\) && view\[i\] === 0\)/.test(page));
+  ok('a ghost cross only goes on an empty square', /classList\.toggle\('ghost', !!fx && fx\.ghost\.has\(i\) && marks\[i\] === 0\)/.test(page));
   ok('the button that makes the crosses is on the page', /id="hintApply"/.test(page));
   ok('and it is hidden until the crosses are on offer', /id="hintApply"[^>]*hidden/.test(page));
   // one Undo has to take a whole hint back, so the crosses go on as one move
@@ -855,19 +907,21 @@ head('12. the page paints what the witness says');
   ok('the crosses go on as a single move', /pushHistory\(\);/.test(finish));
   ok('and none of them count as a mistake', finish.indexOf('afterMove') < 0 && finish.indexOf('mistakes') < 0);
   ok('a tap on the board drops the staged hint', /if \(solved\) return;\n    clearHint\(\);/.test(page));
-  ok('the worked solution is offered when the board is solved', /id="replayBtn"/.test(page));
-  ok('the replay draws on a board of its own', /const view = replay \? replay\.marks : marks;/.test(page));
   ok('the page is English only, with no toggle left in it', !/langBtn|data-lang|toggleLang/.test(page));
+  // The post-solve walk-through is gone: no button, no bar, no code, no strings
+  ok('nothing is left of the worked-solution replay', !/replay|Replay|showReasoning/.test(page));
   // The staged what-if walk is gone, and so is every piece of the page that
   // drew it: no supposed crowns, no dashed rings, no extra taps.
   ok('no square can be drawn holding a crown the hint only supposed', !/trycrown/.test(page));
   ok('the page has nothing left that walks a what-if',
     !/isWalked|cascadeText|tryText|endText|whatif/.test(page));
-  const stages = page.slice(page.indexOf('function stagesOf'), page.indexOf('function clearHint'));
-  ok('every rule gets the same two taps, the sentence and the crosses it offers',
-    (stages.match(/text: w\.text/g) || []).length === 2 && /offer: true/.test(stages) && !/for \(/.test(stages));
-  ok('the replay takes the last stage of every step, one tap each',
-    /const stage = stagesOf\(w\)\.slice\(-1\)\[0\];/.test(page));
+  // Two taps and never a third: the first says it and offers the crosses, the
+  // second is the same as pressing the button.
+  ok('there are no stages left to walk', !/stagesOf|hintStages/.test(page));
+  const stepFn = page.slice(page.indexOf('function stepHint'), page.indexOf("addEventListener('click', stepHint)"));
+  ok('the second tap on Hint makes the crosses', /if \(hintStage\+\+\) \{ finishStep\(step\); return; \}/.test(stepFn));
+  ok('and the first tap already offers them',
+    /\$\('hintApply'\)\.hidden = false;/.test(stepFn) && /const todo = hintTodo\(step\);/.test(stepFn));
   ok('a cross where the crown belongs is called out', /w\.rule === 'wrongcross'/.test(page) && /whyWrongCross/.test(page));
   ok('the campaign progress key was bumped with the new levels',
     /progress4: progress/.test(page) && /levelBests4: levelBests/.test(page) && !/progress3/.test(page));
