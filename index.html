@@ -34,6 +34,8 @@
     --btn-active: #1f2430;
     --btn-active-ink: #f5f4ef;
     --x-ink: rgba(31, 36, 48, .5);
+    /* the staged hint lays a film over the units a deduction is about */
+    --lit-wash: rgba(31, 36, 48, .22);
     --crown: #1b1f28;
     --edge: #23282f;
     --shadow: 0 1px 0 rgba(31,36,48,.08), 0 6px 18px rgba(31,36,48,.10);
@@ -51,6 +53,7 @@
       --wrong: #ff8a80; --wrong-wash: rgba(255, 138, 128, .28); --ok: #6fce97;
       --btn: #232831; --btn-2: #2a303b; --btn-border: #3a404c; --btn-active: #e8e6df; --btn-active-ink: #15181e;
       --x-ink: rgba(240, 238, 230, .62); --crown: #f6f3ea; --edge: #0b0e13;
+      --lit-wash: rgba(255, 255, 255, .24);
       --shadow: 0 1px 0 rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.35);
       --reg0: #9a7d1f; --reg1: #2f5f96; --reg2: #b06a83; --reg3: #3f7c4e; --reg4: #6a53a0;
       --reg5: #a25c22; --reg6: #1f6f6b; --reg7: #7d7462; --reg8: #7a2b33; --reg9: #3a4188;
@@ -63,6 +66,7 @@
     --wrong: #ff8a80; --wrong-wash: rgba(255, 138, 128, .28); --ok: #6fce97;
     --btn: #232831; --btn-2: #2a303b; --btn-border: #3a404c; --btn-active: #e8e6df; --btn-active-ink: #15181e;
     --x-ink: rgba(240, 238, 230, .62); --crown: #f6f3ea; --edge: #0b0e13;
+    --lit-wash: rgba(255, 255, 255, .24);
     --shadow: 0 1px 0 rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.35);
     --reg0: #9a7d1f; --reg1: #2f5f96; --reg2: #b06a83; --reg3: #3f7c4e; --reg4: #6a53a0;
     --reg5: #a25c22; --reg6: #1f6f6b; --reg7: #7d7462; --reg8: #7a2b33; --reg9: #3a4188;
@@ -182,6 +186,20 @@
     border: 3px solid #ffffff; box-shadow: 0 0 0 1.5px rgba(16,19,25,.75);
   }
 
+  /* ------------------------------------------------------ staged hint
+     A deduction is shown on the board itself: a film over the rows, columns
+     and colours it is about, a white ring on the squares that make the case,
+     and a faint X where each cross is about to go. The film has to read on
+     ten region colours in both themes, so it is a neutral wash rather than a
+     tint, and the ring is the same white on near-black as the hint marker. */
+  .cell .wash { position: absolute; inset: 0; pointer-events: none; }
+  .cell.lit .wash { background: var(--lit-wash); }
+  .cell.focus .wash {
+    box-shadow: inset 0 0 0 var(--thick) #ffffff, inset 0 0 0 calc(var(--thick) + 1.5px) rgba(16,19,25,.8);
+  }
+  /* the crosses a hint is offering, not yet made */
+  .cell.ghost .x { opacity: .42; }
+
   /* ---------------------------------------------------------- panel */
   .panel { width: var(--board); display: grid; gap: 14px; align-content: start; }
   @media (orientation: landscape) and (min-width: 760px) { .panel { width: auto; gap: 16px; } }
@@ -203,6 +221,7 @@
 
   .tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
   .tools.two { grid-template-columns: 1fr 1fr; }
+  .tools.three { grid-template-columns: repeat(3, 1fr); }
   button.tool {
     font: inherit; font-family: var(--font-ui); font-size: 17px; font-weight: 700;
     min-height: 62px; border-radius: 13px; border: 1.5px solid var(--btn-border);
@@ -217,6 +236,9 @@
   button.tool.wide { grid-column: 1 / -1; min-height: 54px; }
 
   .note { margin: 0; min-height: 22px; font-size: 16px; line-height: 1.35; color: var(--ok); }
+  /* the hint, and the button that makes the crosses it is offering */
+  .hintrow { display: grid; gap: 4px; justify-items: start; }
+  .replaybar { display: grid; gap: 10px; }
   .note.warn { color: var(--wrong); }
   .record { margin: 0; font-size: 14px; color: var(--ink-soft); }
 
@@ -310,6 +332,10 @@
     @keyframes winSweep { 40% { filter: brightness(1.45) saturate(1.15); transform: scale(1.06); } }
     .cell.win .crown { animation: crownBounce .5s ease both; animation-delay: var(--d, 0ms); }
     @keyframes crownBounce { 35% { transform: translateY(-14%) scale(1.22); } 72% { transform: translateY(0) scale(.95); } to { transform: scale(1); } }
+    /* the crosses a hint is about to make breathe, so they read as an offer
+       rather than as marks already on the board */
+    .cell.ghost .x { animation: ghostX 1.5s ease-in-out infinite; }
+    @keyframes ghostX { 0%, 100% { opacity: .24; } 50% { opacity: .62; } }
     /* the hint sends out two soft rings so her eye finds the square */
     .cell.hinted .hint::before, .cell.hinted .hint::after {
       content: ''; position: absolute; inset: 16%; border-radius: 50%;
@@ -366,7 +392,20 @@
         <button class="tool on" id="autoBtn" type="button"><span data-i18n="autoX">Auto X</span><small id="autoState">on</small></button>
       </div>
 
-      <p class="note" id="hintLine"></p>
+      <div class="hintrow">
+        <p class="note" id="hintLine"></p>
+        <button class="quiet" id="hintApply" type="button" hidden data-i18n="hintApply">Cross them out</button>
+      </div>
+
+      <div class="replaybar" id="replayBar" hidden>
+        <p class="note" id="replayText"></p>
+        <div class="tools three">
+          <button class="tool" id="replayBack" type="button" data-i18n="back">Back</button>
+          <button class="tool" id="replayNext" type="button" data-i18n="next">Next</button>
+          <button class="tool" id="replayDone" type="button" data-i18n="doneReplay">Done</button>
+        </div>
+        <p class="record" id="replayWhere"></p>
+      </div>
 
       <div class="segs" role="radiogroup" aria-label="Mode">
         <button class="seg on" id="modeCampaign" type="button" data-i18n="campaign">Campaign</button>
@@ -413,6 +452,7 @@
     <h2 id="solvedTitle" data-i18n="solvedTitle">Solved!</h2>
     <div class="solved-time" id="solvedTime">0:00</div>
     <p id="solvedNote"></p>
+    <button class="quiet" id="replayBtn" type="button" data-i18n="showReasoning">Show me the reasoning</button>
     <div class="row">
       <button class="btn" id="solvedClose" type="button" data-i18n="look">Look at it</button>
       <button class="btn primary" id="solvedNext" type="button" data-i18n="nextLevel">Next puzzle</button>
@@ -471,6 +511,11 @@
       newBest: 'Your best time yet on a {size} board.', look: 'Look at it', nextLevel: 'Next puzzle',
       newBestLevel: 'Your best time yet on this puzzle.', yourBest: 'Your best on this puzzle is {t}.',
       best: 'Best {size}: {t}', noBest: 'Finish a board and your best time shows up here.',
+      hintApply: 'Cross them out',
+      hintCrossed: 'Those are crossed out. Tap Hint again for the next step.',
+      showReasoning: 'Show me the reasoning',
+      back: 'Back', next: 'Next', doneReplay: 'Done',
+      replayWhere: 'Step {n} of {total}',
       whyRow: 'Only one square is left in this row.',
       whyCol: 'Only one square is left in this column.',
       whyRegion: 'Only one square is left in this colour.',
@@ -517,6 +562,8 @@
   let mode = 'campaign', level = 0, randSize = 8, randBand = 0, randCode = null;
   let progress = {}, bests = {}, levelBests = {};
   let hintCell = -1, hintKind = '';
+  let hintStep = null, hintStage = 0, hintFx = null;   // the staged hint
+  let replay = null;          // the worked solution, replayed after a win
   let doneUnits = new Set();  // rows, columns and colours that already have their crown
   let elim = null;            // cells each crown rules out, for auto X
 
@@ -625,7 +672,8 @@
       if (c < N - 1 && P.regions[i + 1] !== g) parts.push('inset calc(-1 * var(--thick)) 0 0 0 var(--edge)');
       b.style.setProperty('--edges', parts.length ? parts.join(',') : 'none');
       b.setAttribute('aria-label', colName(c) + (r + 1) + ', row ' + (r + 1) + ' column ' + colName(c));
-      b.innerHTML = '<svg class="crown" aria-hidden="true"><use href="#crown"></use></svg><span class="x"></span>'
+      b.innerHTML = '<span class="wash"></span>'
+        + '<svg class="crown" aria-hidden="true"><use href="#crown"></use></svg><span class="x"></span>'
         + '<span class="hint"><svg aria-hidden="true"><use href="#crown"></use></svg></span>';
       board.appendChild(b);
     }
@@ -654,7 +702,9 @@
       history = [];
       mistakes = 0; elapsed = 0; started = 0; running = false; solved = false;
     }
-    hintCell = -1;
+    replay = null;
+    $('replayBar').hidden = true;
+    clearHint();
     paint();
     nudgeUnits(C.conflicts(P.N, P.regions, queenCells()), true);
     introBoard();
@@ -719,7 +769,7 @@
 
   function cycle(i) {
     if (solved) return;
-    hintCell = -1;
+    clearHint();
     pushHistory();
     startClock();
     const m = marks[i];
@@ -783,18 +833,28 @@
   }
 
   // ---------------------------------------------------------------- paint
+  const NO_CLASH = new Set();
   function paint(bad) {
-    if (!bad) bad = C.conflicts(P.N, P.regions, queenCells());
+    // the replay draws the solver's own board at that step, not hers
+    const view = replay ? replay.marks : marks;
+    if (replay) bad = NO_CLASH;
+    else if (!bad) bad = C.conflicts(P.N, P.regions, queenCells());
+    const fx = hintFx;
     const cells = $('board').children;
     for (let i = 0; i < cells.length; i++) {
       const el = cells[i];
-      if (el.dataset.mark !== String(marks[i])) el.dataset.mark = String(marks[i]);
+      if (el.dataset.mark !== String(view[i])) el.dataset.mark = String(view[i]);
       el.classList.toggle('bad', bad.has(i));
       const isHint = i === hintCell;
       // the red-wins guard still applies to the ordinary hint, which shares
       // ::after with .bad; the wrong-crown hint does not, so it is never dropped
       el.classList.toggle('hinted', isHint && hintKind !== 'wrong' && !bad.has(i));
       el.classList.toggle('wronghint', isHint && hintKind === 'wrong');
+      // the staged hint: the units it is about, the squares that make the
+      // case, and the crosses it is offering
+      el.classList.toggle('lit', !!fx && fx.lit.has(i));
+      el.classList.toggle('focus', !!fx && fx.focus.has(i));
+      el.classList.toggle('ghost', !!fx && fx.ghost.has(i) && view[i] === 0);
     }
   }
   function paintPanel() {
@@ -860,7 +920,7 @@
       // the drag begins: paint or rub out, decided by the square it began on
       dragging = true;
       paintMode = marks[downCell] === 1 ? 'erase' : 'paint';
-      hintCell = -1;
+      clearHint();
       pushHistory();
       startClock();
       applyPaint(downCell);
@@ -894,7 +954,7 @@
     if (!history.length || solved) return;
     const h = history.pop();
     restoreMarks(h.marks, h.owners);   // the mistake count is not rolled back
-    hintCell = -1;
+    clearHint();
     paint();
     nudgeUnits(C.conflicts(P.N, P.regions, queenCells()), true);
     paintPanel(); save();
@@ -912,7 +972,7 @@
     hide('confirmDialog');
     if (solved) return;
     pushHistory();
-    marks = new Uint8Array(P.N * P.N); owners = {}; hintCell = -1;
+    marks = new Uint8Array(P.N * P.N); owners = {}; clearHint();
     doneUnits = new Set();
     paint(); paintPanel(); save();
   });
@@ -921,20 +981,144 @@
     if (autoX) { pushHistory(); reapplyAuto(); paint(); }
     paintPanel(); save();
   });
-  $('hintBtn').addEventListener('click', () => {
-    if (solved) return;
-    const h = C.hint(P.N, P.regions, P.sol, queenCells());
+  // ------------------------------------------------------------ the hint
+  // Repeated taps walk one deduction. First the rule, in a sentence, with the
+  // rows, columns and colours it is about washed over and the squares that
+  // make the case ringed. Then the crosses that follow, drawn faintly where
+  // they would go and named in the line. Then those crosses go on the board
+  // for her, and if that hands her a crown straight away, the crown is marked
+  // the way a hint always was. Every word of it comes from the solver working
+  // on her crowns, so a hint can never say something the board does not hold.
+  const crossedCells = () => {
+    const s = new Set();
+    for (let i = 0; i < marks.length; i++) if (marks[i] === 1) s.add(i);
+    return s;
+  };
+  const unitKeyOf = u => (u.kind === 'row' ? 'r' : u.kind === 'col' ? 'c' : 'g') + u.k;
+  function hintFxOf(w, ghosts) {
+    const lit = new Set(), focus = new Set(), ghost = new Set();
+    for (const u of w.units || []) for (const i of unitCells(unitKeyOf(u))) lit.add(i);
+    // only the rules that turn on two or three named squares ring anything;
+    // everywhere else the wash over the units has already said it
+    for (const i of w.ring || []) focus.add(i);
+    for (const i of ghosts || []) ghost.add(i);
+    return { lit: lit, focus: focus, ghost: ghost };
+  }
+  function clearHint(keepLine) {
+    hintCell = -1; hintKind = ''; hintStep = null; hintStage = 0; hintFx = null;
+    $('hintApply').hidden = true;
+    if (!keepLine) { $('hintLine').textContent = ''; $('hintLine').classList.remove('warn'); }
+  }
+  function sayHint(text, warn) {
     const line = $('hintLine');
-    if (!h) { line.textContent = t('whyDone'); line.classList.remove('warn'); return; }
-    hintCell = h.r * P.N + h.c;
-    hintKind = h.kind;
-    if (h.kind === 'wrong') { line.textContent = t('whyWrong'); line.classList.add('warn'); }
-    else {
-      line.classList.remove('warn');
-      line.textContent = t(h.why === 'row' ? 'whyRow' : h.why === 'col' ? 'whyCol' : h.why === 'region' ? 'whyRegion' : 'whySol');
+    line.textContent = text;
+    line.classList.toggle('warn', !!warn);
+  }
+  // the crosses of a step she has not already made herself
+  const hintTodo = w => w.elim.filter(i => marks[i] === 0);
+  function showCrown(w) {
+    hintCell = w.place.r * P.N + w.place.c;
+    hintKind = 'place';
+    hintFx = hintFxOf(w, null);
+    sayHint(w.text, false);
+  }
+  // the crosses go on as one move, so one Undo takes the whole hint back, and
+  // they are marks like any other: nothing here counts as a mistake
+  function finishStep(step) {
+    const todo = hintTodo(step);
+    if (todo.length) {
+      pushHistory();
+      startClock();
+      for (const i of todo) if (marks[i] !== 2) setCross(i, 'h');
+      paintPanel(); save();
+    }
+    clearHint(true);
+    if (step.then) showCrown(step.then);
+    else sayHint(t('hintCrossed'), false);
+    paint();
+  }
+  function stepHint() {
+    if (solved || replay) return;
+    const w = C.explain(P.N, P.regions, P.sol, queenCells(), crossedCells());
+    if (!w) { clearHint(true); paint(); sayHint(t('whyDone'), false); return; }
+    // a crown in the wrong place is still the first thing said, and the only
+    // thing said until it comes off
+    if (w.rule === 'wrong') {
+      clearHint(true);
+      hintCell = w.r * P.N + w.c; hintKind = 'wrong';
+      sayHint(t('whyWrong'), true);
+      paint();
+      return;
+    }
+    // a crown that can be proved right now needs no stages
+    if (w.place) { clearHint(true); showCrown(w); paint(); return; }
+    if (!hintStep || hintStep.text !== w.text) { clearHint(true); hintStep = w; hintStage = 0; }
+    const step = hintStep;
+    hintStage++;
+    if (hintStage === 1) {
+      hintFx = hintFxOf(step, null);
+      sayHint(step.text, false);
+      $('hintApply').hidden = true;
+    } else if (hintStage === 2) {
+      const todo = hintTodo(step);
+      hintFx = hintFxOf(step, todo);
+      sayHint(step.text + ' ' + C.sayCrosses(P.N, todo), false);
+      $('hintApply').hidden = false;
+    } else {
+      finishStep(step);
+      return;
     }
     paint();
-  });
+  }
+  $('hintBtn').addEventListener('click', stepHint);
+  $('hintApply').addEventListener('click', () => { if (hintStep && !solved) finishStep(hintStep); });
+
+  // ---------------------------------------------------------- the replay
+  // The whole chain, from an empty board to the finished one, one step a tap,
+  // with the same wash and rings the hint uses. It draws on a board of its
+  // own, so the solved board underneath is never touched.
+  function replayMarks(upto) {
+    const N = P.N, m = new Uint8Array(N * N);
+    for (let k = 0; k < upto; k++) {
+      const w = replay.steps[k];
+      if (w.place) {
+        const i = w.place.r * N + w.place.c;
+        m[i] = 2;
+        for (const j of elim[i]) if (m[j] !== 2) m[j] = 1;
+      } else for (const i of w.elim) if (m[i] !== 2) m[i] = 1;
+    }
+    return m;
+  }
+  function drawReplay() {
+    const w = replay.steps[replay.at];
+    replay.marks = replayMarks(replay.at);
+    hintCell = -1; hintKind = '';
+    if (w.place) { hintCell = w.place.r * P.N + w.place.c; hintKind = 'place'; hintFx = hintFxOf(w, null); }
+    else hintFx = hintFxOf(w, w.elim);
+    $('replayText').textContent = w.text + (w.crossText ? ' ' + w.crossText : '');
+    $('replayWhere').textContent = t('replayWhere', { n: faNum(replay.at + 1), total: faNum(replay.steps.length) });
+    $('replayBack').disabled = replay.at === 0;
+    $('replayNext').disabled = replay.at >= replay.steps.length - 1;
+    paint();
+  }
+  function startReplay() {
+    const steps = C.chain(P.N, P.regions, P.sol);
+    if (!steps || !steps.length) return;
+    clearHint();
+    replay = { steps: steps, at: 0, marks: new Uint8Array(P.N * P.N) };
+    $('replayBar').hidden = false;
+    drawReplay();
+  }
+  function endReplay() {
+    replay = null;
+    $('replayBar').hidden = true;
+    clearHint();
+    paint();
+  }
+  $('replayBtn').addEventListener('click', () => { hide('solvedDialog'); startReplay(); });
+  $('replayBack').addEventListener('click', () => { if (replay && replay.at > 0) { replay.at--; drawReplay(); } });
+  $('replayNext').addEventListener('click', () => { if (replay && replay.at < replay.steps.length - 1) { replay.at++; drawReplay(); } });
+  $('replayDone').addEventListener('click', endReplay);
 
   // ---------------------------------------------------------------- modes
   function setMode(m) {

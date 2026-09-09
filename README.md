@@ -13,8 +13,12 @@ column and every colour region. Crowns may never touch, not even at a corner.
   back when the crown comes off.
 - A crown that breaks a rule turns red straight away, along with the crown it
   clashes with. Mistakes are counted and never go down, even after Undo.
-- Hint marks one square that can be proved and says why in a line.
-- English and Persian, right to left with Persian numerals. Light and dark.
+- Hint explains the deduction in stages: the rule in a sentence, with the rows,
+  columns and colours it turns on washed over, then the crosses that follow,
+  drawn faintly until you take them, then the crown at the end of it. Every
+  word comes from the solver working on the crowns already on the board.
+- Solve a board and "Show me the reasoning" replays the whole chain, a step a tap.
+- English only. Light and dark.
 - No ads, no timers counting down, no lives. The clock only counts up.
 - The game in progress, the campaign record and the best time per board size
   are all kept on the device.
