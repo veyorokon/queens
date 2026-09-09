@@ -38,9 +38,10 @@ const levels = read('levels.js');
 const head = src.slice(src.indexOf('<title>'), src.indexOf('</head>'));
 let body = src.slice(src.indexOf('<body>') + '<body>'.length, src.indexOf('</body>'));
 
-const tags = '<script src="core.js"></script>\n<script src="levels.js"></script>';
-if (body.indexOf(tags) < 0) throw new Error('the two script tags were not found in index.html; the mirror would ship an empty page');
-body = body.replace(tags, '<script>\n' + source + '\n</script>\n<script>\n' + levels + '\n</script>');
+// the core.js tag carries a cache-busting ?v= that changes with the solver
+const tags = /<script src="core\.js(?:\?v=[^"]*)?"><\/script>\n<script src="levels\.js(?:\?v=[^"]*)?"><\/script>/;
+if (!tags.test(body)) throw new Error('the two script tags were not found in index.html; the mirror would ship an empty page');
+body = body.replace(tags, () => '<script>\n' + source + '\n</script>\n<script>\n' + levels + '\n</script>');
 
 const page = head.trimEnd() + '\n' + body.trim() + '\n';
 if (page.indexOf('src="core.js"') >= 0 || page.indexOf('QUEENS_LEVELS') < 0) throw new Error('the mirror did not inline cleanly');
