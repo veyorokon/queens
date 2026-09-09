@@ -360,9 +360,9 @@ head('10. every step of a hint carries a witness');
   const all = levels.campaign.concat(...Object.values(levels.pool).map(b => [].concat.apply([], b)));
   const boards = all.map(C.decode);
 
-  // Walking the chain again here, rather than trusting what it hands back,
-  // is the point: every witness is re-checked against the board state it was
-  // made on. `walk` calls back with (state before the step, the step).
+  // Walking the chain again here, rather than trusting what it hands back, is
+  // the point: every witness is re-checked against the board state it was made
+  // on. `walk` calls back with (state before the step, the step).
   function walk(p, fn) {
     const st = C.newState(p.N, p.regions);
     for (const w of C.chain(p.N, p.regions, p.sol)) {
@@ -371,7 +371,6 @@ head('10. every step of a hint carries a witness');
     }
     return true;
   }
-  const liveIn = (st, cells) => cells.filter(i => st.cand[i]);
   const cellsOfUnit = (N, regions, u) => {
     const out = [];
     for (let i = 0; i < N * N; i++) {
@@ -380,9 +379,12 @@ head('10. every step of a hint carries a witness');
     }
     return out;
   };
+  const liveIn = (st, cells) => cells.filter(i => st.cand[i]);
+  const indexOfCell = (N, regions, kind, i) => kind === 'row' ? (i / N) | 0 : kind === 'col' ? i % N : regions[i];
+  const unitBusy = (st, u) => u.kind === 'row' ? st.queenCol[u.k] !== -1 : u.kind === 'col' ? !!st.colDone[u.k] : !!st.regDone[u.k];
 
-  let chains = 0, short = null, ruleless = null, textless = null, noProgress = null;
-  const seenRules = {};
+  let short = null, ruleless = null, textless = null, noProgress = null;
+  const seenRules = {}, seenPairs = {}, seenK = {};
   for (let n = 0; n < boards.length; n++) {
     const p = boards[n];
     const ch = C.chain(p.N, p.regions, p.sol);
@@ -390,18 +392,22 @@ head('10. every step of a hint carries a witness');
     if (crowns !== p.N) { short = all[n] + ' placed ' + crowns + '/' + p.N; break; }
     for (const w of ch) {
       seenRules[w.rule] = (seenRules[w.rule] || 0) + 1;
+      if (w.rule === 'subset') { seenPairs[w.from + '->' + w.to] = 1; seenK[w.k] = 1; }
       if (w.rule === 'solution') ruleless = ruleless || all[n];
       if (!w.text || !/^[A-Z]/.test(w.text) || !/\.$/.test(w.text)) textless = textless || (all[n] + ' :: ' + w.text);
       if (!w.place && !w.elim.length) noProgress = noProgress || all[n];
     }
-    chains++;
   }
   ok('all ' + all.length + ' shipped puzzles reach the answer step by step', short === null, short || '');
   ok('no step falls back on being told the answer', ruleless === null, ruleless || '');
   ok('every step says why, in a sentence', textless === null, textless || '');
   ok('every step that is not a crown crosses something out', noProgress === null, noProgress || '');
-  ok('all five rules turn up across the shipped boards (' +
-    Object.keys(seenRules).sort().join(', ') + ')', Object.keys(seenRules).length === 5);
+  ok('all four rules turn up across the shipped boards (' + Object.keys(seenRules).sort().join(', ') + ')',
+    ['single', 'subset', 'touch', 'whatif'].every(r => seenRules[r] > 0));
+  ok('all six ordered pairs of unit kinds turn up (' + Object.keys(seenPairs).sort().join(', ') + ')',
+    Object.keys(seenPairs).length === 6);
+  ok('subsets of every size from one to four turn up (' + Object.keys(seenK).sort().join(', ') + ')',
+    [1, 2, 3, 4].every(k => seenK[k]));
 
   // nothing a witness crosses out may be a square of the answer
   {
@@ -415,6 +421,21 @@ head('10. every step of a hint carries a witness');
       });
     }
     ok('no witness ever crosses out a square of the answer', bad === null, bad || '');
+  }
+
+  // a crown always sends the hint back to the singles, so the step after one
+  // is the unit it just emptied rather than something clever
+  {
+    let bad = null, checked = 0;
+    for (let n = 0; n < boards.length && !bad; n++) {
+      const p = boards[n];
+      walk(p, (st, w) => {
+        if (w.rule === 'single') return;
+        checked++;
+        if (C.findSingle(st)) { bad = all[n] + ' reached for ' + w.rule + ' with a single on the board'; return false; }
+      });
+    }
+    ok('no rule is reached for while a single is still there (' + checked + ' steps)', bad === null, bad || '');
   }
 
   // singles: the unit it names really is down to one square
@@ -432,106 +453,92 @@ head('10. every step of a hint carries a witness');
     ok('every single names a unit with exactly one square left (' + n2 + ' of them)', bad === null, bad || '');
   }
 
-  // line confinement: the colour really is stuck in that line, or the line
-  // really has nothing but that colour left
+  // subsets: k units of one kind, k of another, and the squares really are
+  // inside. This is the check that k = 1 confinement and the counting steps
+  // both hold, since they are the same rule.
   {
     let bad = null, n2 = 0;
     for (let n = 0; n < boards.length && !bad; n++) {
       const p = boards[n], N = p.N;
       walk(p, (st, w) => {
-        if (w.rule !== 'line') return;
+        if (w.rule !== 'subset') return;
         n2++;
-        const ln = w.lines[0], g = w.colours[0];
-        const inLine = i => ln.kind === 'row' ? ((i / N) | 0) === ln.k : (i % N) === ln.k;
-        const colourLive = liveIn(st, cellsOfUnit(N, p.regions, { kind: 'reg', k: g }));
-        const lineLive = liveIn(st, cellsOfUnit(N, p.regions, ln));
-        const held = w.dir === 'colour-in-line'
-          ? colourLive.every(inLine) && w.elim.every(i => inLine(i) && p.regions[i] !== g)
-          : lineLive.every(i => p.regions[i] === g) && w.elim.every(i => p.regions[i] === g && !inLine(i));
+        const S = w.fromUnits, T = w.toUnits;
+        const inT = i => T.some(u => indexOfCell(N, p.regions, u.kind, i) === u.k);
+        const inS = i => S.some(u => indexOfCell(N, p.regions, u.kind, i) === u.k);
+        let held = S.length === w.k && T.length === w.k && w.k >= 1 && w.k <= 4
+          && w.from !== w.to
+          && S.every(u => u.kind === w.from) && T.every(u => u.kind === w.to)
+          && !S.some(u => unitBusy(st, u)) && !T.some(u => unitBusy(st, u));
+        // every square each unit of S has left sits inside the units of T
+        for (const u of S) {
+          const live = liveIn(st, cellsOfUnit(N, p.regions, u));
+          if (!live.length || !live.every(inT)) held = false;
+        }
+        // and the crosses are what is left standing in T that is not S's
+        const should = [];
+        for (const u of T) for (const i of liveIn(st, cellsOfUnit(N, p.regions, u))) if (!inS(i)) should.push(i);
+        if (should.length !== w.elim.length || !should.every(i => w.elim.indexOf(i) >= 0)) held = false;
         if (!held) { bad = all[n] + ' ' + w.text; return false; }
       });
     }
-    ok('every line confinement holds on the board it was made on (' + n2 + ' of them)', bad === null, bad || '');
+    ok('every subset really does confine, at every k (' + n2 + ' of them)', bad === null, bad || '');
   }
 
-  // counting: the sets are the same size and the squares really are inside
-  {
-    let bad = null, n2 = 0, sizes = {};
-    for (let n = 0; n < boards.length && !bad; n++) {
-      const p = boards[n], N = p.N;
-      walk(p, (st, w) => {
-        if (w.rule !== 'count') return;
-        n2++;
-        sizes[w.colours.length] = (sizes[w.colours.length] || 0) + 1;
-        const kind = w.lines[0].kind, ks = w.lines.map(l => l.k);
-        const inLines = i => ks.indexOf(kind === 'row' ? (i / N) | 0 : i % N) >= 0;
-        let held = w.colours.length === w.lines.length && w.colours.length >= 2 && w.colours.length <= 4
-          && w.lines.every(l => l.kind === kind);
-        // every remaining square of every colour in the set sits in the lines
-        for (const g of w.colours) {
-          const live = liveIn(st, cellsOfUnit(N, p.regions, { kind: 'reg', k: g }));
-          if (!live.length) held = false;
-          if (w.dir === 'colours-in-lines' && !live.every(inLines)) held = false;
-        }
-        if (w.dir === 'colours-in-lines') {
-          // and the crosses are the squares in those lines wearing another colour
-          if (!w.elim.every(i => inLines(i) && w.colours.indexOf(p.regions[i]) < 0)) held = false;
-        } else {
-          // the other way round: those lines hold nothing but those colours
-          for (const l of w.lines) {
-            const live = liveIn(st, cellsOfUnit(N, p.regions, l));
-            if (!live.length || !live.every(i => w.colours.indexOf(p.regions[i]) >= 0)) held = false;
-          }
-          if (!w.elim.every(i => !inLines(i) && w.colours.indexOf(p.regions[i]) >= 0)) held = false;
-        }
-        if (!held) { bad = all[n] + ' ' + w.text; return false; }
-      });
-    }
-    ok('every counting witness really does confine (' + n2 + ' of them)', bad === null, bad || '');
-    ok('counting stops at sets of four (sizes seen: ' + Object.keys(sizes).sort().join(', ') + ')',
-      Object.keys(sizes).every(k => +k >= 2 && +k <= 4) && Object.keys(sizes).length > 1);
-  }
-
-  // forced squares: every square the unit could still use rules the cross out
-  {
-    let bad = null, n2 = 0;
-    for (let n = 0; n < boards.length && !bad; n++) {
-      const p = boards[n], N = p.N;
-      const es = C.elimSets(N, p.regions);
-      walk(p, (st, w) => {
-        if (w.rule !== 'confine') return;
-        n2++;
-        const live = liveIn(st, cellsOfUnit(N, p.regions, w.units[0]));
-        const same = live.length === w.cells.length && live.every(i => w.cells.indexOf(i) >= 0);
-        const wipes = w.elim.every(y => live.every(x => es[x].indexOf(y) >= 0));
-        if (!same || !wipes || live.length < 2) { bad = all[n] + ' ' + w.text; return false; }
-      });
-    }
-    ok('every forced square is ruled out by all of that unit (' + n2 + ' of them)', bad === null, bad || '');
-  }
-
-  // disproof: the crown really does empty the unit the sentence names
+  // touching: a crown on the square really would leave that unit with nothing
   {
     let bad = null, n2 = 0;
     for (let n = 0; n < boards.length && !bad; n++) {
       const p = boards[n], N = p.N;
       walk(p, (st, w) => {
-        if (w.rule !== 'lookahead') return;
+        if (w.rule !== 'touch') return;
+        n2++;
+        for (const y of w.elim) {
+          const t = C.cloneState(st);
+          const put = C.place(t, (y / N) | 0, y % N);
+          const left = liveIn(t, cellsOfUnit(N, p.regions, w.emptied));
+          if (!put || left.length) { bad = all[n] + ' ' + w.text + ' (' + C.cellName(N, y) + ')'; return false; }
+        }
+      });
+    }
+    ok('every touching square really would empty the unit it names (' + n2 + ' of them)', bad === null, bad || '');
+  }
+
+  // one-step what-if: the crown, the cascade, and the unit that runs out
+  {
+    let bad = null, n2 = 0;
+    for (let n = 0; n < boards.length && !bad; n++) {
+      const p = boards[n], N = p.N;
+      walk(p, (st, w) => {
+        if (w.rule !== 'whatif') return;
         n2++;
         const t = C.cloneState(st);
-        const r = (w.trigger / N) | 0, c = w.trigger % N;
         const trace = { steps: [], empty: null };
-        const ok2 = C.place(t, r, c) && C.singlesPass(t, trace) >= 0;
-        if (ok2) { bad = all[n] + ': that crown is fine, ' + w.text; return false; }
-        const live = liveIn(t, cellsOfUnit(N, p.regions, w.emptied));
+        const fine = C.place(t, (w.trigger / N) | 0, w.trigger % N) && C.singlesPass(t, trace) >= 0;
+        if (fine) { bad = all[n] + ': that crown is fine, ' + w.text; return false; }
+        const left = liveIn(t, cellsOfUnit(N, p.regions, w.emptied));
         // either the unit has nothing left, or its one square is in a column
         // or a colour already spoken for
-        const stuck = live.length === 0 ||
-          (live.length === 1 && (t.colDone[live[0] % N] || t.regDone[p.regions[live[0]]]));
+        const stuck = left.length === 0 ||
+          (left.length === 1 && (t.colDone[left[0] % N] || t.regDone[p.regions[left[0]]]));
         if (!stuck || w.elim.length !== 1 || w.elim[0] !== w.trigger) { bad = all[n] + ' ' + w.text; return false; }
+        // it earns the deeper wording: a plain touching step would have caught
+        // it already, so the cascade is what does the work
+        if (!w.cascade.length) { bad = all[n] + ': a what-if with nothing forced, ' + w.text; return false; }
       });
     }
-    ok('every disproof really does empty the unit it names (' + n2 + ' of them)', bad === null, bad || '');
+    ok('every what-if really does empty the unit it names (' + n2 + ' of them)', bad === null, bad || '');
+  }
+
+  // the rater is untouched: its passes still say the same thing about every
+  // board that shipped, down to the effort score stored with it
+  {
+    let drift = null;
+    for (let n = 0; n < boards.length && !drift; n++) {
+      const r = C.rate(boards[n].N, boards[n].regions);
+      if (r.band !== boards[n].band || r.score !== boards[n].score) drift = all[n] + ' -> band ' + r.band + ' score ' + r.score;
+    }
+    ok('the rater still gives every shipped puzzle its stored band and score', drift === null, drift || '');
   }
 }
 
@@ -621,21 +628,21 @@ head('12. the page paints what the witness says');
 
   // the witness fields the page paints with have to be there on every step
   const levels = require(path.join(__dirname, '..', 'levels.js'));
-  let missing = null, rings = { confine: 0, lookahead: 0 }, quiet = 0;
+  let missing = null, rings = { touch: 0, whatif: 0 }, quiet = 0;
   for (const str of levels.campaign) {
     const p = C.decode(str);
     for (const w of C.chain(p.N, p.regions, p.sol)) {
       if (!Array.isArray(w.units) || !Array.isArray(w.cells) || !Array.isArray(w.ring) || !Array.isArray(w.elim)) { missing = w.rule; break; }
       if (!w.ring.every(i => w.cells.indexOf(i) >= 0)) { missing = w.rule + ': ring is not part of the case'; break; }
-      if (w.rule === 'confine' || w.rule === 'lookahead') { if (w.ring.length) rings[w.rule]++; }
+      if (w.rule === 'touch' || w.rule === 'whatif') { if (w.ring.length) rings[w.rule]++; }
       else if (!w.ring.length) quiet++;
     }
     if (missing) break;
   }
   ok('every witness carries the units, cells, ring and crosses the page paints', missing === null, missing || '');
-  ok('the two rules that turn on named squares ring them (' + rings.confine + ' forced, ' + rings.lookahead + ' disproved)',
-    rings.confine > 0 && rings.lookahead > 0);
-  ok('the confinement rules leave the ring to the wash (' + quiet + ' steps)', quiet > 0);
+  ok('the two rules that turn on named squares ring them (' + rings.touch + ' touching, ' + rings.whatif + ' what-if)',
+    rings.touch > 0 && rings.whatif > 0);
+  ok('the subset rules leave the ring to the wash (' + quiet + ' steps)', quiet > 0);
 }
 
 console.log('\n' + (fail ? 'FAILED ' + fail + ' of ' + (pass + fail) : 'all ' + pass + ' checks passed'));

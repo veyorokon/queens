@@ -756,12 +756,18 @@
   // Nothing here deduces anything the passes cannot; it only records the
   // reason, so the page can say it out loud and a test can check it holds.
   //
-  // The order is the solver's own, cheapest rule first: a unit down to one
-  // square, a colour or a line confined on its own, the same confinement
-  // shared between two, three or four colours, a square that every placement
-  // of one unit would wipe out, and only then a crown tried and disproved.
-  // Counting sits above plain confinement because a set of one *is* plain
-  // confinement; the sets only get bigger.
+  // There are three kinds of unit, rows, columns and colours, and every one
+  // holds exactly one crown. That makes the whole family of rules four:
+  //   1 single    a unit with one square left
+  //   2 subset    k units of one kind whose squares all lie inside k units of
+  //               another kind, so those k are spoken for. k of 1 is plain
+  //               confinement, k of 2 to 4 the counting steps, and all six
+  //               ordered pairs of the three kinds are searched.
+  //   3 touching  a square that would leave some unit nowhere to go, which is
+  //               the what-if below with nothing to work out
+  //   4 what-if   a crown put down, singles run out from it, a unit emptied
+  // Cheapest first, and singles first of all, so the step after a crown is the
+  // unit it just emptied rather than something clever.
 
   const COLOUR_NAMES = ['yellow', 'blue', 'pink', 'green', 'purple', 'orange', 'teal', 'sand', 'red', 'indigo'];
   const COUNT_WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
@@ -794,18 +800,15 @@
     return head + listWords(s.map(label));
   }
   const coloursPhrase = gs => listWords(gs.slice().sort((a, b) => a - b).map(g => COLOUR_NAMES[g]));
+  const nounOf = kind => kind === 'row' ? 'row' : kind === 'col' ? 'column' : 'colour';
+  const pluralOf = kind => kind === 'row' ? 'rows' : kind === 'col' ? 'columns' : 'colours';
+  // a set of units said out loud, whichever kind they are
+  const unitsPhrase = (kind, ks) => kind === 'reg' ? coloursPhrase(ks) : linesPhrase(kind, ks);
   // the one sentence that names the crosses. The page rebuilds it from the
   // squares she has not already crossed herself, so it lives on its own.
   function sayCrosses(N, cells) {
     if (!cells || !cells.length) return '';
     return 'That crosses out ' + namesOf(N, cells, 6) + '.';
-  }
-
-  const liveOf = (st, cells) => cells.filter(i => st.cand[i]);
-  function regionCells(st, g) {
-    const N = st.N, out = [];
-    for (let i = 0; i < N * N; i++) if (st.regions[i] === g) out.push(i);
-    return out;
   }
 
   // 1. a row, a column or a colour with one square left
@@ -822,48 +825,55 @@
     };
   }
 
-  // 2. a colour whose last squares share a line owns it; a line with one
-  //    colour left owns that colour
-  function stepLine(st) {
+  // 2. subsets. Every unit has to hold exactly one crown, so if k units of one
+  //    kind have all their remaining squares inside k units of another kind,
+  //    those k units are spoken for and everything else standing in them is
+  //    out. k of 1 is plain confinement, a colour trapped in a line or a line
+  //    with one colour left in it; k of 2, 3 and 4 are the counting steps.
+  //    Six ordered pairs of the three kinds of unit, colours first, because a
+  //    colour caught in a line is the one anybody sees first.
+  const PAIRS = [['reg', 'row'], ['reg', 'col'], ['row', 'reg'], ['col', 'reg'], ['row', 'col'], ['col', 'row']];
+  const unitIndex = (st, kind, i) => kind === 'row' ? (i / st.N) | 0 : kind === 'col' ? i % st.N : st.regions[i];
+  function unitCellsOf(st, kind, k) {
+    const N = st.N, out = [];
+    if (kind === 'row') for (let c = 0; c < N; c++) out.push(k * N + c);
+    else if (kind === 'col') for (let r = 0; r < N; r++) out.push(r * N + k);
+    else for (let i = 0; i < N * N; i++) if (st.regions[i] === k) out.push(i);
+    return out;
+  }
+  const unitTaken = (st, kind, k) =>
+    kind === 'row' ? st.queenCol[k] !== -1 : kind === 'col' ? !!st.colDone[k] : !!st.regDone[k];
+
+  function stepSubset(st, k) {
     const N = st.N;
-    for (let g = 0; g < N; g++) {
-      if (st.regDone[g]) continue;
-      const live = liveOf(st, regionCells(st, g));
-      if (live.length < 2) continue;             // one square left is a single
-      const rows = new Set(live.map(i => (i / N) | 0));
-      const cols = new Set(live.map(i => i % N));
-      const tries = [[rows, 'row'], [cols, 'col']];
-      for (const pair of tries) {
-        if (pair[0].size !== 1) continue;
-        const kind = pair[1], k = pair[0].values().next().value;
-        const elim = [];
-        for (let j = 0; j < N; j++) {
-          const i = kind === 'row' ? k * N + j : j * N + k;
-          if (st.cand[i] && st.regions[i] !== g) elim.push(i);
-        }
-        if (elim.length) return {
-          rule: 'line', dir: 'colour-in-line', colours: [g],
-          lines: [{ kind: kind, k: k }], units: [{ kind: kind, k: k }],
-          cells: live, ring: [], elim: elim,
-        };
+    for (const pair of PAIRS) {
+      const A = pair[0], B = pair[1];
+      const mask = [], keys = [];
+      for (let a = 0; a < N; a++) {
+        if (unitTaken(st, A, a)) continue;
+        let m = 0;
+        for (const i of unitCellsOf(st, A, a)) if (st.cand[i]) m |= 1 << unitIndex(st, B, i);
+        if (!m || popcount(m) > k) continue;   // already too wide to fit in k
+        mask.push(m); keys.push(a);
       }
-    }
-    for (const kind of ['row', 'col']) {
-      for (let k = 0; k < N; k++) {
-        if (kind === 'row' ? st.queenCol[k] !== -1 : st.colDone[k]) continue;
-        const live = [];
-        for (let j = 0; j < N; j++) {
-          const i = kind === 'row' ? k * N + j : j * N + k;
-          if (st.cand[i]) live.push(i);
+      for (const pick of subsetHit(mask, k, k)) {
+        const S = pick.map(x => keys[x]);
+        let union = 0;
+        for (const x of pick) union |= mask[x];
+        const T = bitsOf(union);
+        if (T.some(b => unitTaken(st, B, b))) continue;
+        const elim = [], cells = [];
+        for (const b of T) for (const i of unitCellsOf(st, B, b)) {
+          if (!st.cand[i]) continue;
+          if (S.indexOf(unitIndex(st, A, i)) >= 0) cells.push(i); else elim.push(i);
         }
-        if (live.length < 2) continue;
-        const g = st.regions[live[0]];
-        if (!live.every(i => st.regions[i] === g)) continue;
-        const elim = regionCells(st, g).filter(i => st.cand[i] && live.indexOf(i) < 0);
-        if (elim.length) return {
-          rule: 'line', dir: 'line-in-colour', colours: [g],
-          lines: [{ kind: kind, k: k }], units: [{ kind: kind, k: k }],
-          cells: live, ring: [], elim: elim,
+        if (!elim.length) continue;
+        return {
+          rule: 'subset', k: k, from: A, to: B,
+          fromUnits: S.map(a => ({ kind: A, k: a })), toUnits: T.map(b => ({ kind: B, k: b })),
+          units: T.map(b => ({ kind: B, k: b })),
+          colours: A === 'reg' ? S.slice() : (B === 'reg' ? T.slice() : []),
+          cells: cells, ring: [], elim: elim,
         };
       }
     }
@@ -872,83 +882,6 @@
 
   const popcount = m => { let n = 0; while (m) { m &= m - 1; n++; } return n; };
   const bitsOf = m => { const a = []; for (let k = 0; m; k++, m >>>= 1) if (m & 1) a.push(k); return a; };
-
-  // 3. counting. |G| colours whose squares all fall inside |G| lines own those
-  //    lines, and |L| lines holding only |L| colours use those colours up.
-  //    Sets of two, three and four; a set of one is stepLine above.
-  function stepCount(st, size) {
-    const N = st.N;
-    const orders = ['row', 'col'];
-    // colours -> lines
-    for (const kind of orders) {
-      const mask = [], keys = [];
-      for (let g = 0; g < N; g++) {
-        if (st.regDone[g]) continue;
-        let m = 0;
-        for (const i of regionCells(st, g)) if (st.cand[i]) m |= 1 << (kind === 'row' ? (i / N) | 0 : i % N);
-        if (!m || popcount(m) > size) continue;
-        mask.push(m); keys.push(g);
-      }
-      const found = subsetHit(mask, size, size);
-      for (const pick of found) {
-        const gs = pick.map(x => keys[x]);
-        let union = 0;
-        for (const x of pick) union |= mask[x];
-        const ks = bitsOf(union);
-        if (ks.some(k => kind === 'row' ? st.queenCol[k] !== -1 : !!st.colDone[k])) continue;
-        const elim = [];
-        for (const k of ks) for (let j = 0; j < N; j++) {
-          const i = kind === 'row' ? k * N + j : j * N + k;
-          if (st.cand[i] && gs.indexOf(st.regions[i]) < 0) elim.push(i);
-        }
-        if (!elim.length) continue;
-        const cells = [];
-        for (const g of gs) for (const i of regionCells(st, g)) if (st.cand[i]) cells.push(i);
-        return {
-          rule: 'count', dir: 'colours-in-lines', colours: gs,
-          lines: ks.map(k => ({ kind: kind, k: k })), units: ks.map(k => ({ kind: kind, k: k })),
-          cells: cells, ring: [], elim: elim,
-        };
-      }
-    }
-    // lines -> colours
-    for (const kind of orders) {
-      const mask = [], keys = [];
-      for (let k = 0; k < N; k++) {
-        if (kind === 'row' ? st.queenCol[k] !== -1 : !!st.colDone[k]) continue;
-        let m = 0;
-        for (let j = 0; j < N; j++) {
-          const i = kind === 'row' ? k * N + j : j * N + k;
-          if (st.cand[i]) m |= 1 << st.regions[i];
-        }
-        if (!m || popcount(m) > size) continue;
-        mask.push(m); keys.push(k);
-      }
-      const found = subsetHit(mask, size, size);
-      for (const pick of found) {
-        const ks = pick.map(x => keys[x]);
-        let union = 0;
-        for (const x of pick) union |= mask[x];
-        const gs = bitsOf(union);
-        if (gs.some(g => !!st.regDone[g])) continue;
-        const inLine = new Set();
-        for (const k of ks) for (let j = 0; j < N; j++) inLine.add(kind === 'row' ? k * N + j : j * N + k);
-        const elim = [];
-        const cells = [];
-        for (const g of gs) for (const i of regionCells(st, g)) {
-          if (!st.cand[i]) continue;
-          if (inLine.has(i)) cells.push(i); else elim.push(i);
-        }
-        if (!elim.length) continue;
-        return {
-          rule: 'count', dir: 'lines-in-colours', colours: gs,
-          lines: ks.map(k => ({ kind: kind, k: k })), units: ks.map(k => ({ kind: kind, k: k })),
-          cells: cells, ring: [], elim: elim,
-        };
-      }
-    }
-    return null;
-  }
   // every subset of exactly `size` masks whose union covers exactly `want`
   // bits. The union can only grow, so a branch already too wide is dropped.
   function subsetHit(mask, size, want) {
@@ -967,29 +900,33 @@
     return out;
   }
 
-  // 4. a square that every square a unit could still use would rule out
-  function stepConfine(st) {
+  // 3. touching. A square that every remaining square of some unit shares a
+  //    row, a column or a colour with, or touches, is a square no crown can
+  //    stand on: it would leave that unit nowhere to go. This is the what-if
+  //    below with nothing to work out, so it is said the same way.
+  function stepTouch(st) {
     const N = st.N;
     if (!st.elim) st.elim = elimSets(N, st.regions);
     const es = st.elim, cnt = new Int16Array(N * N);
     for (const u of unitsOf(st)) {
       if (unitDone(st, u)) continue;
       const live = u.cells.filter(i => st.cand[i]);
-      if (live.length < 2) continue;
+      if (live.length < 2) continue;          // one square left is a single
       cnt.fill(0);
       for (const x of live) for (const y of es[x]) cnt[y]++;
       const elim = [];
       for (let y = 0; y < N * N; y++) if (st.cand[y] && cnt[y] === live.length) elim.push(y);
       if (elim.length) return {
-        rule: 'confine', units: [{ kind: u.kind, k: u.k }],
+        rule: 'touch', emptied: { kind: u.kind, k: u.k }, units: [{ kind: u.kind, k: u.k }],
         colours: u.kind === 'reg' ? [u.k] : [], cells: live, ring: live, elim: elim,
       };
     }
     return null;
   }
 
-  // 5. a crown tried on one square, and the unit that runs out of room
-  function stepLookahead(st) {
+  // 4. one step of what-if: a crown put down, singles run out from it, and a
+  //    unit left with nothing.
+  function stepWhatIf(st) {
     const N = st.N;
     for (let r = 0; r < N; r++) {
       if (st.queenCol[r] !== -1) continue;
@@ -1001,7 +938,7 @@
         if (place(t, r, c) && singlesPass(t, trace) >= 0) continue;
         const emptied = trace.empty || { kind: 'row', k: r };
         return {
-          rule: 'lookahead', trigger: i, emptied: emptied, cascade: trace.steps,
+          rule: 'whatif', trigger: i, emptied: emptied, cascade: trace.steps,
           units: [emptied], colours: emptied.kind === 'reg' ? [emptied.k] : [],
           cells: [i].concat(trace.steps.map(s => s.r * N + s.c)),
           ring: [i].concat(trace.steps.map(s => s.r * N + s.c)), elim: [i],
@@ -1011,14 +948,15 @@
     return null;
   }
 
-  // the cheapest rule that makes progress, with its witness
+  // The cheapest rule that makes progress, with its witness. Singles come
+  // first every time, so the step after a crown is the row it just emptied
+  // rather than something clever.
   function nextStep(st, sol) {
     if (st.nQueens >= st.N) return null;
     let w = stepSingle(st);
-    if (!w) w = stepLine(st);
-    if (!w) for (let size = 2; size <= 4 && !w; size++) w = stepCount(st, size);
-    if (!w) w = stepConfine(st);
-    if (!w) w = stepLookahead(st);
+    for (let k = 1; k <= 4 && !w; k++) w = stepSubset(st, k);
+    if (!w) w = stepTouch(st);
+    if (!w) w = stepWhatIf(st);
     if (!w && sol) {
       for (let r = 0; r < st.N; r++) if (st.queenCol[r] === -1) {
         w = { rule: 'solution', why: 'solution', place: { r: r, c: sol[r] }, units: [{ kind: 'row', k: r }], colours: [], cells: [r * st.N + sol[r]], ring: [], elim: [] };
@@ -1028,6 +966,7 @@
     if (w) describe(st, w);
     return w;
   }
+
   function applyStep(st, w) {
     if (w.place) return place(st, w.place.r, w.place.c);
     for (const i of w.elim) st.cand[i] = 0;
@@ -1043,32 +982,37 @@
     const N = st.N;
     if (w.rule === 'single') {
       const u = w.units[0];
-      w.text = cap1(unitName(u.kind, u.k)) + ' is down to one square, so its crown goes on '
+      w.text = cap1(unitName(u.kind, u.k)) + ' has only one square left, so its crown goes on '
         + cellName(N, w.place.r * N + w.place.c) + '.';
     } else if (w.rule === 'solution') {
       w.text = cellName(N, w.place.r * N + w.place.c) + " is this row's square.";
-    } else if (w.rule === 'line') {
-      const ln = w.lines[0], g = COLOUR_NAMES[w.colours[0]];
-      w.text = w.dir === 'colour-in-line'
-        ? cap1(g) + "'s last squares are all in " + lineName(ln.kind, ln.k) + '.'
-        : 'Every square left in ' + lineName(ln.kind, ln.k) + ' is ' + g + ', so ' + g
-          + "'s crown is in that " + (ln.kind === 'row' ? 'row' : 'column') + '.';
-    } else if (w.rule === 'count') {
-      const ks = w.lines.map(l => l.k), kind = w.lines[0].kind;
-      const lines = linesPhrase(kind, ks), cols = coloursPhrase(w.colours);
-      w.text = w.dir === 'colours-in-lines'
-        ? cap1(cols) + (w.colours.length === 2 ? ' both live in ' : ' all live in ') + lines + ', so those '
-          + (kind === 'row' ? 'rows' : 'columns') + ' are theirs.'
-        : cap1(lines) + ' have nothing left but ' + cols + ', so those ' + countWord(w.colours.length)
-          + ' colours belong there.';
-    } else if (w.rule === 'confine') {
-      const u = w.units[0], n = w.cells.length;
-      const where = n <= 3
-        ? 'has to go on ' + namesOf(N, w.cells, 3, 'or')
-        : 'has to go on one of ' + countWord(n) + ' squares';
-      const both = n === 2 ? 'both of those squares' : 'all ' + countWord(n) + ' of them';
-      w.text = cap1(unitName(u.kind, u.k)) + "'s crown " + where + '. Anything ' + both + ' attack is out.';
-    } else if (w.rule === 'lookahead') {
+    } else if (w.rule === 'subset') {
+      const S = w.fromUnits.map(u => u.k), T = w.toUnits.map(u => u.k);
+      if (w.k === 1 && w.from === 'reg') {
+        // "Grey's last squares are all in row 8."
+        w.text = cap1(COLOUR_NAMES[S[0]]) + "'s last squares are all in " + lineName(w.to, T[0]) + '.';
+      } else if (w.k === 1 && w.to === 'reg') {
+        // "Every square left in row 6 is orange, so orange's crown is in row 6."
+        const g = COLOUR_NAMES[T[0]];
+        w.text = 'Every square left in ' + lineName(w.from, S[0]) + ' is ' + g + ', so ' + g
+          + "'s crown is in that " + nounOf(w.from) + '.';
+      } else if (w.to === 'reg') {
+        // "Rows 3 and 4 have nothing left but pink and green."
+        w.text = cap1(unitsPhrase(w.from, S)) + ' have nothing left but ' + coloursPhrase(T)
+          + ', so those ' + countWord(w.k) + ' colours belong there.';
+      } else {
+        // "Purple, red and blue all live in columns F to H."
+        const verb = w.from === 'reg' ? (w.k === 2 ? ' both live in ' : ' all live in ')
+          : (w.k === 1 ? ' only has squares in ' : ' only have squares in ');
+        w.text = cap1(unitsPhrase(w.from, S)) + verb + unitsPhrase(w.to, T)
+          + ', so those ' + pluralOf(w.to) + ' are theirs.';
+      }
+    } else if (w.rule === 'touch') {
+      const gone = unitName(w.emptied.kind, w.emptied.k), n = w.elim.length;
+      const where = n <= 3 ? 'A crown at ' + namesOf(N, w.elim, 3, 'or')
+        : 'A crown on any of ' + countWord(n) + ' squares';
+      w.text = where + ' would leave ' + gone + ' with nowhere to go.';
+    } else if (w.rule === 'whatif') {
       const at = cellName(N, w.trigger), gone = unitName(w.emptied.kind, w.emptied.k);
       const n = w.cascade.length;
       let forced = '';
