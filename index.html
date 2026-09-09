@@ -252,6 +252,7 @@
   .replaybar { display: grid; gap: 10px; }
   .note.warn { color: var(--wrong); }
   .record { margin: 0; font-size: 14px; color: var(--ink-soft); }
+  .build { margin: 0; font-size: 11px; color: var(--ink-soft); opacity: .6; text-align: right; font-variant-numeric: tabular-nums; letter-spacing: .03em; }
 
   .segs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .seg {
@@ -443,6 +444,7 @@
         <button class="tool" id="levelsBtn" type="button"><span data-i18n="allLevels">All puzzles</span></button>
         <button class="tool" id="helpBtn" type="button"><span data-i18n="help">How to play</span></button>
       </div>
+      <p class="build" id="build" aria-hidden="true"></p>
     </aside>
   </main>
 </div>
@@ -494,7 +496,16 @@
 </div>
 
 <script src="core.js?v=87f6749"></script>
-<script src="levels.js"></script>
+<script src="levels.js?v=87f6749"></script>
+<script>
+  // the build stamp comes from the solver's cache tag, so a screenshot says which build it is
+  (function () {
+    var tag = document.querySelector('script[src^="core.js"]');
+    var m = tag && /[?&]v=([^&]+)/.exec(tag.getAttribute('src'));
+    var el = document.getElementById('build');
+    if (el && m) el.textContent = 'build ' + m[1];
+  })();
+</script>
 <script>
 (() => {
   'use strict';
